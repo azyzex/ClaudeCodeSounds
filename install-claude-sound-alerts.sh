@@ -255,6 +255,8 @@ esac
 [ -n "$DETAIL" ] || DETAIL="$FALLBACK"
 
 # --- play --------------------------------------------------------------------
+PLAYER_USED=""   # set by play_file on success; stays empty if we fell back to the bell
+
 find_sound() {
   if [ "$(uname -s)" = "Darwin" ]; then
     for n in $MAC_SOUNDS; do
@@ -291,7 +293,7 @@ play_file() {
       aplay)             case "$1" in *.wav) "$p" -q "$1" >/dev/null 2>&1 ;; *) false ;; esac ;;
       *)                 "$p" "$1" >/dev/null 2>&1 ;;
     esac
-    [ $? -eq 0 ] && return 0
+    if [ $? -eq 0 ]; then PLAYER_USED="$p"; return 0; fi
   done
   return 1
 }
@@ -313,25 +315,36 @@ else
   if [ "$REPEAT" = "1" ]; then sleep 0.12; bell; fi
 fi
 
-[ "$KIND" = "done" ] && [ "$TOAST_ON_DONE" != "1" ] && exit 0
-
 # --- desktop notification ----------------------------------------------------
-if [ "$(uname -s)" = "Darwin" ]; then
-  if command -v terminal-notifier >/dev/null 2>&1; then
-    terminal-notifier -title "$TITLE" -message "$DETAIL" >/dev/null 2>&1 || true
-  elif command -v osascript >/dev/null 2>&1; then
-    # Escape double quotes and backslashes for AppleScript.
-    esc() { printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'; }
-    osascript -e "display notification \"$(esc "$DETAIL")\" with title \"$(esc "$TITLE")\"" \
-      >/dev/null 2>&1 || true
+NOTIFIED=no
+if [ "$KIND" != "done" ] || [ "$TOAST_ON_DONE" = "1" ]; then
+  if [ "$(uname -s)" = "Darwin" ]; then
+    if command -v terminal-notifier >/dev/null 2>&1; then
+      terminal-notifier -title "$TITLE" -message "$DETAIL" >/dev/null 2>&1 && NOTIFIED=terminal-notifier
+    elif command -v osascript >/dev/null 2>&1; then
+      # Escape backslashes and double quotes for AppleScript.
+      esc() { printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'; }
+      osascript -e "display notification \"$(esc "$DETAIL")\" with title \"$(esc "$TITLE")\"" \
+        >/dev/null 2>&1 && NOTIFIED=osascript
+    fi
+  elif command -v notify-send >/dev/null 2>&1; then
+    case "$KIND" in
+      done) URGENCY=low ;;
+      *)    URGENCY=critical ;;
+    esac
+    # -t is ignored by some daemons; harmless where it is.
+    notify-send -a "Claude Code" -u "$URGENCY" -t 8000 "$TITLE" "$DETAIL" >/dev/null 2>&1 \
+      && NOTIFIED=notify-send
   fi
-elif command -v notify-send >/dev/null 2>&1; then
-  case "$KIND" in
-    done) URGENCY=low ;;
-    *)    URGENCY=critical ;;
-  esac
-  # -t is ignored by some daemons; harmless where it is.
-  notify-send -a "Claude Code" -u "$URGENCY" -t 8000 "$TITLE" "$DETAIL" >/dev/null 2>&1 || true
+fi
+
+# --- report ------------------------------------------------------------------
+# CLAUDE_NOTIFY_DEBUG=1 prints the decision it reached instead of staying silent.
+# Useful for working out why nothing is audible, and it is what CI asserts on,
+# since a zero exit alone cannot distinguish a played sound from a fallback bell.
+if [ "${CLAUDE_NOTIFY_DEBUG:-0}" = "1" ]; then
+  printf 'kind=%s sound=%s player=%s notified=%s detail=%s\n' \
+    "$KIND" "${SOUND:-none}" "${PLAYER_USED:-bell}" "$NOTIFIED" "$DETAIL"
 fi
 
 exit 0

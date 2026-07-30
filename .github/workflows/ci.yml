@@ -20,11 +20,20 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install the freedesktop sound theme (Linux)
+      # The runner ships with neither sounds nor any audio player, so without
+      # this the notifier would find nothing to play and fall straight through
+      # to the terminal bell, leaving the interesting path untested. A null sink
+      # gives paplay somewhere real to write to.
+      - name: Install sounds, players and a null audio sink (Linux)
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y -qq sound-theme-freedesktop libnotify-bin
+          sudo apt-get install -y -qq \
+            sound-theme-freedesktop libnotify-bin \
+            pulseaudio pulseaudio-utils alsa-utils ffmpeg
+          pulseaudio --start --exit-idle-time=-1 || true
+          pactl load-module module-null-sink sink_name=ci >/dev/null 2>&1 || true
+          pactl info 2>/dev/null | head -3 || echo "no pulse server, expect the bell fallback"
 
       - name: Integration tests
         run: bash tests/test-unix.sh
@@ -50,21 +59,45 @@ jobs:
           fail=0
           for kind in done blocked limit error; do
             rm -f "${TMPDIR:-/tmp}"/claude-notify.*.last
+            out=$(mktemp); errf=$(mktemp)
             # The if-form keeps `set -e` from aborting before the code is read.
-            if err=$(echo '{"message":"ci payload","session_id":"ci","cwd":"/tmp/p"}' \
-                     | bash "$HOME/.claude/claude-notify.sh" "$kind" 2>&1 >/dev/null); then
-              rc=0
-            else
-              rc=$?
-            fi
+            if echo '{"message":"ci payload","session_id":"ci","cwd":"/tmp/p"}' \
+               | CLAUDE_NOTIFY_DEBUG=1 bash "$HOME/.claude/claude-notify.sh" "$kind" \
+                 >"$out" 2>"$errf"; then rc=0; else rc=$?; fi
+            report=$(cat "$out"); err=$(cat "$errf"); rm -f "$out" "$errf"
+
             if [ "$rc" != "0" ]; then
-              echo "  FAIL $kind exited $rc"; fail=1
-            elif [ -n "$err" ]; then
-              echo "  FAIL $kind wrote to stderr: $err"; fail=1
-            else
-              echo "  ok   $kind"
+              echo "  FAIL $kind exited $rc"; fail=1; continue
+            fi
+            if [ -n "$err" ]; then
+              echo "  FAIL $kind wrote to stderr: $err"; fail=1; continue
+            fi
+            echo "  ok   $kind -> $report"
+
+            # A zero exit says nothing about whether audio was reached, so assert
+            # on the reported decision. macOS always has afplay, so falling back
+            # to the bell there is a genuine regression.
+            case "$report" in
+              *"sound=none"*)
+                echo "       FAIL no sound file was found at all"; fail=1 ;;
+            esac
+            if [ "$(uname -s)" = "Darwin" ]; then
+              case "$report" in
+                *player=afplay*) ;;
+                *) echo "       FAIL expected afplay on macOS, got: $report"; fail=1 ;;
+              esac
             fi
           done
+
+          # On Linux a working sink is not guaranteed, so report rather than fail.
+          if [ "$(uname -s)" = "Linux" ]; then
+            rm -f "${TMPDIR:-/tmp}"/claude-notify.*.last
+            r=$(echo '{}' | CLAUDE_NOTIFY_DEBUG=1 bash "$HOME/.claude/claude-notify.sh" done 2>/dev/null)
+            case "$r" in
+              *player=bell*) echo "note: no usable audio player on this runner, bell fallback exercised" ;;
+              *)             echo "note: a real player handled it -> $r" ;;
+            esac
+          fi
           exit "$fail"
 
   test-windows:

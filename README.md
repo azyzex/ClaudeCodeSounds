@@ -97,7 +97,19 @@ Edit `~/.claude/claude-notify.ps1` or `~/.claude/claude-notify.sh` directly. Re-
 
 **Nothing fires at all.** Restart Claude Code first, since settings are read at startup. Then run `claude --debug` and watch for the hook lines as events happen.
 
-**Hooks run but there is no sound.** The notifier falls back to a terminal bell when it cannot find a playable sound file. On a minimal Linux install, the sound theme is often missing:
+**Hooks run but there is no sound.** First find out what the notifier actually decided. On Linux and macOS it will tell you:
+
+```bash
+CLAUDE_NOTIFY_DEBUG=1 ~/.claude/claude-notify.sh blocked
+```
+
+```
+kind=blocked sound=/usr/share/sounds/freedesktop/stereo/dialog-warning.oga player=paplay notified=notify-send detail=...
+```
+
+`sound=none` means no sound file was found. `player=bell` means a file was found but every player either was missing or failed, so it fell back to the terminal bell. That distinction tells you which of the two fixes below you need.
+
+On a minimal Linux install, the sound theme is often missing:
 
 ```bash
 sudo apt install sound-theme-freedesktop libcanberra-gtk-module
