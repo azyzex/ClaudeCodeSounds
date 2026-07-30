@@ -1,0 +1,10 @@
+# The shell installer must never be checked out with CRLF. A stray carriage
+# return turns the shebang into an unrecognised interpreter and every line into
+# "command not found".
+*.sh text eol=lf
+
+# PowerShell is fine either way, but keep it consistent with Windows.
+*.ps1 text eol=crlf
+
+*.md   text
+LICENSE text
