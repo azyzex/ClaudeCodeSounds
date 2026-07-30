@@ -84,9 +84,10 @@ jobs:
             esac
 
             # Collect the resolved file so distinctness can be checked below.
+            # Pipe-delimited rather than newline-delimited, because a bare
+            # newline here would end the YAML block scalar.
             picked=${report#*sound=}; picked=${picked%% *}
-            chosen="$chosen$picked
-"
+            chosen="$chosen$picked|"
             if [ "$(uname -s)" = "Darwin" ]; then
               case "$report" in
                 *player=afplay*) ;;
@@ -99,12 +100,12 @@ jobs:
           # limit and error resolving to the same file on both macOS and
           # Windows, which quietly defeated the entire point of giving
           # rate_limit its own StopFailure matcher.
-          uniq_count=$(printf '%s' "$chosen" | grep -c . || true)
-          distinct=$(printf '%s' "$chosen" | sort -u | grep -c . || true)
-          echo "resolved $uniq_count sounds, $distinct distinct"
-          if [ "$uniq_count" = "4" ] && [ "$distinct" != "4" ]; then
+          total=$(printf '%s' "$chosen" | tr '|' '\n' | grep -c . || true)
+          distinct=$(printf '%s' "$chosen" | tr '|' '\n' | sort -u | grep -c . || true)
+          echo "resolved $total sounds, $distinct distinct"
+          if [ "$total" = "4" ] && [ "$distinct" != "4" ]; then
             echo "FAIL two alert kinds resolve to the same sound file:"
-            printf '%s' "$chosen" | sort | uniq -d | sed 's/^/  /'
+            printf '%s' "$chosen" | tr '|' '\n' | sort | uniq -d | sed 's/^/  /'
             fail=1
           fi
 
