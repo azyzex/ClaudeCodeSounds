@@ -179,7 +179,9 @@ TOAST_ON_DONE="${TOAST_ON_DONE:-0}"
 # --- debounce ----------------------------------------------------------------
 # Several of these events can fire inside the same second. Without this you get
 # a stutter of overlapping audio.
-STAMP="${TMPDIR:-/tmp}/claude-notify.last"
+# Namespaced by uid: on a shared box /tmp is world-writable and a single shared
+# stamp file would let one user's alerts silence another's.
+STAMP="${TMPDIR:-/tmp}/claude-notify.$(id -u 2>/dev/null || echo 0).last"
 NOW=$(date +%s)
 if [ -f "$STAMP" ]; then
   LAST=$(cat "$STAMP" 2>/dev/null || echo 0)
@@ -193,10 +195,15 @@ printf '%s' "$NOW" > "$STAMP" 2>/dev/null || true
 # --- read the hook payload ---------------------------------------------------
 # Claude Code sends the event JSON on stdin. Notification events carry .message
 DETAIL=""
+PY=""
+for c in python3 python; do
+  command -v "$c" >/dev/null 2>&1 && { PY="$c"; break; }
+done
 if [ ! -t 0 ]; then
   PAYLOAD=$(cat 2>/dev/null || true)
-  if [ -n "$PAYLOAD" ] && command -v python3 >/dev/null 2>&1; then
-    DETAIL=$(printf '%s' "$PAYLOAD" | python3 -c '
+  # No interpreter is not an error, you just get the generic text for this kind.
+  if [ -n "$PAYLOAD" ] && [ -n "$PY" ]; then
+    DETAIL=$(printf '%s' "$PAYLOAD" | "$PY" -c '
 import json, sys
 try:
     o = json.load(sys.stdin)
@@ -271,15 +278,20 @@ find_sound() {
 
 play_file() {
   # afplay on macOS; on Linux prefer the players that handle .oga.
+  #
+  # A player being installed does not mean it works. paplay ships on plenty of
+  # ALSA-only and headless boxes and just fails, and pw-play fails wherever
+  # PipeWire is not the running server. So a failure has to fall through to the
+  # next candidate rather than give up on the whole chain.
   for p in afplay paplay pw-play canberra-gtk-play ffplay aplay; do
     command -v "$p" >/dev/null 2>&1 || continue
     case "$p" in
       canberra-gtk-play) "$p" -f "$1" >/dev/null 2>&1 ;;
       ffplay)            "$p" -nodisp -autoexit -loglevel quiet "$1" >/dev/null 2>&1 ;;
-      aplay)             case "$1" in *.wav) "$p" -q "$1" >/dev/null 2>&1 ;; *) continue ;; esac ;;
+      aplay)             case "$1" in *.wav) "$p" -q "$1" >/dev/null 2>&1 ;; *) false ;; esac ;;
       *)                 "$p" "$1" >/dev/null 2>&1 ;;
     esac
-    return $?
+    [ $? -eq 0 ] && return 0
   done
   return 1
 }
@@ -332,7 +344,7 @@ ok "wrote $NOTIFY_SCRIPT"
 
 printf '\n'
 step "test tone..."
-rm -f "${TMPDIR:-/tmp}/claude-notify.last"
+rm -f "${TMPDIR:-/tmp}/claude-notify.$(id -u 2>/dev/null || echo 0).last"
 "$NOTIFY_SCRIPT" done </dev/null || true
 
 printf '\n'
