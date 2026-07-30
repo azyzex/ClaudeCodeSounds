@@ -43,7 +43,7 @@ less install.sh
 bash install.sh
 ```
 
-Either way, restart Claude Code afterwards and run `/hooks` to confirm four entries are listed.
+Either way, restart Claude Code afterwards and run `/hooks` to confirm the entries are listed: five on Linux and macOS, four on Windows.
 
 The installer plays a test tone at the end. If you hear it, the audio path works.
 
@@ -52,9 +52,10 @@ The installer plays a test tone at the end. If you hear it, the audio path works
 Two files, both under `~/.claude`:
 
 - `claude-notify.ps1` or `claude-notify.sh` is created. This is the script that actually picks a sound and plays it.
-- `settings.json` is backed up with a timestamp, then four hook entries are added to it.
+- `settings.json` is backed up with a timestamp, then the hook entries are added to it.
+- On Linux and macOS, `claude-notify.conf` is created if absent. Your edits to it are never overwritten.
 
-The installer merges rather than replaces. Any hooks you already have are left alone. It is safe to re-run: it strips its own entries before writing, so running it twice does not stack duplicates and give you four overlapping chimes.
+The installer merges rather than replaces. Any hooks you already have are left alone. It is safe to re-run: it strips its own entries before writing, so running it twice does not stack duplicates and give you overlapping chimes.
 
 ## Uninstall
 
@@ -72,12 +73,13 @@ To silence the alerts temporarily without uninstalling, set `"disableAllHooks": 
 
 ## How it works
 
-Claude Code has a [hooks](https://code.claude.com/docs/en/hooks) system: you attach a command to a named point in its lifecycle and it runs deterministically, without the model having to decide to call it. Four events matter here.
+Claude Code has a [hooks](https://code.claude.com/docs/en/hooks) system: you attach a command to a named point in its lifecycle and it runs deterministically, without the model having to decide to call it. These events matter here.
 
 - **`Stop`** fires at the end of every turn. No matcher, it always fires.
 - **`Notification`** fires when Claude wants something from you. It takes a matcher on notification type, so this setup listens for `permission_prompt`, `idle_prompt`, `agent_needs_input`, and `elicitation_dialog`, and deliberately ignores the rest. You do not want a chime for `auth_success`.
 - **`StopFailure`** fires when a turn ends on an error, and it takes a matcher on error type. One of the values is `rate_limit`, which means hitting your usage limit can have its own distinct sound instead of being lumped in with every other failure. That is the alert that is genuinely hard to get any other way.
 - **`StopFailure`** again, matched against every remaining error type, for real failures.
+- **`UserPromptSubmit`** records when a turn started, so `Stop` can tell a ten-minute turn from a four-second one. It plays nothing. Linux and macOS only, for now.
 
 Two details make the difference between this being useful and being actively annoying.
 
