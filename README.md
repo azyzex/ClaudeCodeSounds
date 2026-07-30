@@ -15,7 +15,7 @@ This wires four distinct sounds to four points in Claude Code's lifecycle:
 | Alarm, plus a desktop notification | You hit your usage limit |
 | Alarm, plus a desktop notification | The turn died on some other API error |
 
-It installs into `~/.claude/settings.json`, so it applies to every project and every terminal with no per-repository setup.
+It installs into `~/.claude/settings.json`, so it applies to every project and every terminal with no per-repository setup. It also stays quiet when you do not need it: see [Options](#options).
 
 ## Install
 
@@ -85,9 +85,34 @@ Two details make the difference between this being useful and being actively ann
 
 **Debouncing.** Several of these events can fire inside the same second, and you get a stutter of overlapping sounds. The notifier keeps a timestamp in the temp directory and ignores anything that arrives within a couple of seconds of the last alert.
 
-## Customising it
+## Options
 
-Edit `~/.claude/claude-notify.ps1` or `~/.claude/claude-notify.sh` directly. Re-running the installer overwrites it, so keep a copy of your changes.
+On Linux and macOS the installer asks about each option the first time you run it, and writes your answers to `~/.claude/claude-notify.conf`. To change them later:
+
+```bash
+bash install-claude-sound-alerts.sh --config
+```
+
+Or edit the file directly. The notifier re-reads it on every alert, so changes take effect immediately with no reinstall and no restart. The installer never overwrites an existing config.
+
+| Option | Default | What it does |
+| --- | --- | --- |
+| `MIN_SECONDS` | `30` | Stay silent when a turn finished faster than this. Short back-and-forth turns are the main source of alert fatigue. `0` disables the check. |
+| `SUPPRESS_WHEN_FOCUSED` | `1` | Skip the alert when the terminal is already the focused window, on the basis that you are evidently already looking at it. |
+| `PROJECT_PITCH` | `1` | Pick the finish sound from the working directory, so with several terminals open you can tell which project it was. |
+| `SPEAK` | `0` | Read the alert aloud instead of playing a sound. |
+| `TOAST_ON_DONE` | `0` | Also raise a desktop notification when a turn merely finishes. |
+| `DEBOUNCE_SECONDS` | `2` | Ignore repeat alerts for this long, so overlapping events do not stutter. |
+| `ALWAYS_ALERT` | `blocked,limit,error` | Kinds that ignore `MIN_SECONDS` and the focus check, because you want to know regardless. |
+| `MUTE` | empty | Kinds to silence completely. |
+
+The config file is parsed, never sourced, so nothing in it can execute.
+
+Two caveats on the focus check. On macOS it compares the frontmost application against a list of known terminals and editors, so it is app-level rather than window-level. On Linux it needs `xdotool` under X11; Wayland exposes no portable way to ask, so there it always alerts. Any uncertainty resolves to "not focused", meaning the failure mode is an alert you did not strictly need rather than a missed one.
+
+## Customising the sounds
+
+Edit `~/.claude/claude-notify.ps1` or `~/.claude/claude-notify.sh` directly. Re-running the installer overwrites the notifier, so keep a copy of your changes. Your config file is safe.
 
 - **Different sounds.** Each alert kind has a list of candidate sound files and the first one that exists on the machine wins. Put your own file at the front of the list. Windows looks in `C:\Windows\Media`; macOS looks in `~/Library/Sounds` and `/System/Library/Sounds`; Linux looks through the freedesktop sound theme directories.
 - **A notification on every finish too.** Set `$ToastOnDone = $true` in the PowerShell version, or run with `TOAST_ON_DONE=1` in the shell version.

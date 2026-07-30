@@ -68,13 +68,13 @@ echo
 echo "case 1: fresh install into an empty HOME"
 # --------------------------------------------------------------------------
 H=$(mktemp -d)
-HOME="$H" NO_TEST_TONE=1 bash "$INSTALLER" >/dev/null 2>&1
+HOME="$H" NO_TEST_TONE=1 NONINTERACTIVE=1 bash "$INSTALLER" >/dev/null 2>&1
 check "$?" "0" "installer exits 0"
 S="$H/.claude/settings.json"
 [ -f "$S" ] && ok "settings.json created" || bad "settings.json created"
 [ -f "$H/.claude/claude-notify.sh" ] && ok "notifier created" || bad "notifier created"
 [ -x "$H/.claude/claude-notify.sh" ] && ok "notifier is executable" || bad "notifier is executable"
-check "$(ours "$S" | tr '\n' ' ')" "Notification=1 Stop=1 StopFailure=2 " "four hook groups across three events"
+check "$(ours "$S" | tr '\n' ' ')" "Notification=1 Stop=1 StopFailure=2 UserPromptSubmit=1 " "five hook groups across four events"
 "$PY" -c "import json,sys; json.load(open(sys.argv[1],encoding='utf-8-sig'))" "$S" 2>/dev/null \
   && ok "settings.json parses as JSON" || bad "settings.json parses as JSON"
 # A BOM would break strict parsers, so assert the first byte is '{'.
@@ -101,7 +101,7 @@ cat > "$H/.claude/settings.json" <<'EOF'
   }
 }
 EOF
-HOME="$H" NO_TEST_TONE=1 bash "$INSTALLER" >/dev/null 2>&1
+HOME="$H" NO_TEST_TONE=1 NONINTERACTIVE=1 bash "$INSTALLER" >/dev/null 2>&1
 check "$?" "0" "installer exits 0 over existing settings"
 S="$H/.claude/settings.json"
 check "$(getkey "$S" model)" "opus" "unrelated key 'model' preserved"
@@ -115,9 +115,14 @@ echo
 # --------------------------------------------------------------------------
 echo "case 3: re-running is idempotent"
 # --------------------------------------------------------------------------
-HOME="$H" NO_TEST_TONE=1 bash "$INSTALLER" >/dev/null 2>&1
-HOME="$H" NO_TEST_TONE=1 bash "$INSTALLER" >/dev/null 2>&1
-check "$(ours "$S" | tr '\n' ' ')" "Notification=1 PostToolUse=0 Stop=1 StopFailure=2 " "still exactly four groups after three runs"
+# Assert the exit codes, not just the end state. A re-run that dies early leaves
+# the correct JSON behind from the previous run, so without these the whole case
+# passes while the installer is in fact broken.
+HOME="$H" NO_TEST_TONE=1 NONINTERACTIVE=1 bash "$INSTALLER" >/dev/null 2>&1
+check "$?" "0" "second run exits 0"
+HOME="$H" NO_TEST_TONE=1 NONINTERACTIVE=1 bash "$INSTALLER" >/dev/null 2>&1
+check "$?" "0" "third run exits 0"
+check "$(ours "$S" | tr '\n' ' ')" "Notification=1 PostToolUse=0 Stop=1 StopFailure=2 UserPromptSubmit=1 " "still exactly five groups after three runs"
 grep -q 'somebody-elses-hook' "$S" && ok "other hooks still intact" || bad "other hooks still intact"
 echo
 
@@ -139,7 +144,7 @@ echo "case 5: refuses to clobber invalid JSON"
 # --------------------------------------------------------------------------
 H=$(mktemp -d); mkdir -p "$H/.claude"
 printf '{ this is not json' > "$H/.claude/settings.json"
-HOME="$H" NO_TEST_TONE=1 bash "$INSTALLER" >/dev/null 2>&1
+HOME="$H" NO_TEST_TONE=1 NONINTERACTIVE=1 bash "$INSTALLER" >/dev/null 2>&1
 [ "$?" != "0" ] && ok "exits non-zero on malformed settings.json" || bad "exits non-zero on malformed settings.json"
 grep -q 'this is not json' "$H/.claude/settings.json" && ok "malformed file left untouched" || bad "malformed file left untouched"
 rm -rf "$H"
@@ -149,9 +154,9 @@ echo
 echo "case 6: the notifier survives every alert kind"
 # --------------------------------------------------------------------------
 H=$(mktemp -d)
-HOME="$H" NO_TEST_TONE=1 bash "$INSTALLER" >/dev/null 2>&1
+HOME="$H" NO_TEST_TONE=1 NONINTERACTIVE=1 bash "$INSTALLER" >/dev/null 2>&1
 N="$H/.claude/claude-notify.sh"
-for kind in "done" blocked limit error bogus-kind; do
+for kind in mark "done" blocked limit error bogus-kind; do
   rm -f "${TMPDIR:-/tmp}"/claude-notify.*.last
   err=$(echo '{"message":"test payload","session_id":"s1","cwd":"/tmp/proj"}' \
         | HOME="$H" bash "$N" "$kind" 2>&1 >/dev/null)
@@ -172,6 +177,85 @@ HOME="$H" bash "$N" "done" </dev/null >/dev/null 2>&1
 HOME="$H" bash "$N" "done" </dev/null >/dev/null 2>&1
 check "$?" "0" "second immediate call still exits 0"
 ls "${TMPDIR:-/tmp}"/claude-notify.*.last >/dev/null 2>&1 && ok "debounce stamp is uid-namespaced" || bad "debounce stamp written"
+rm -rf "$H"
+echo
+
+# --------------------------------------------------------------------------
+echo "case 7: the config file drives behaviour"
+# --------------------------------------------------------------------------
+H=$(mktemp -d)
+HOME="$H" NO_TEST_TONE=1 NONINTERACTIVE=1 bash "$INSTALLER" >/dev/null 2>&1
+N="$H/.claude/claude-notify.sh"
+C="$H/.claude/claude-notify.conf"
+[ -f "$C" ] && ok "config file created" || bad "config file created"
+
+# Ask the notifier what it decided rather than inferring from a zero exit.
+decide() {  # decide <kind> [payload]
+  rm -f "${TMPDIR:-/tmp}"/claude-notify.*.last
+  printf '%s' "${2:-\{\}}" \
+    | HOME="$H" CLAUDE_NOTIFY_DEBUG=1 bash "$N" "$1" 2>/dev/null | tr -d '\r'
+}
+
+setconf() {  # setconf KEY VALUE
+  sed -i.bak "s/^$1=.*/$1=$2/" "$C" && rm -f "$C.bak"
+}
+
+echo "  (mute)"
+setconf MUTE "done"
+r=$(decide "done")
+case "$r" in *suppressed=muted*) ok "MUTE=done silences the finish alert" ;; *) bad "MUTE ignored: $r" ;; esac
+r=$(decide blocked)
+case "$r" in *suppressed=muted*) bad "MUTE=done wrongly silenced blocked" ;; *) ok "MUTE=done leaves blocked alone" ;; esac
+setconf MUTE ""
+
+echo "  (elapsed-time threshold)"
+setconf MIN_SECONDS 30
+# 'mark' records a start time; an immediate 'done' is therefore far too quick.
+printf '{"session_id":"t7"}' | HOME="$H" bash "$N" mark >/dev/null 2>&1
+r=$(printf '{"session_id":"t7"}' | HOME="$H" CLAUDE_NOTIFY_DEBUG=1 bash "$N" "done" 2>/dev/null | tr -d '\r')
+case "$r" in *suppressed=too-quick*) ok "a turn under MIN_SECONDS stays silent" ;; *) bad "expected too-quick, got: $r" ;; esac
+# blocked is in ALWAYS_ALERT, so the same short turn must still alert.
+printf '{"session_id":"t7"}' | HOME="$H" bash "$N" mark >/dev/null 2>&1
+r=$(printf '{"session_id":"t7"}' | HOME="$H" CLAUDE_NOTIFY_DEBUG=1 bash "$N" blocked 2>/dev/null | tr -d '\r')
+case "$r" in *suppressed=*) bad "ALWAYS_ALERT did not bypass the threshold: $r" ;; *) ok "ALWAYS_ALERT bypasses the threshold" ;; esac
+# MIN_SECONDS=0 disables the check entirely.
+setconf MIN_SECONDS 0
+printf '{"session_id":"t7"}' | HOME="$H" bash "$N" mark >/dev/null 2>&1
+r=$(printf '{"session_id":"t7"}' | HOME="$H" CLAUDE_NOTIFY_DEBUG=1 bash "$N" "done" 2>/dev/null | tr -d '\r')
+case "$r" in *too-quick*) bad "MIN_SECONDS=0 should disable the check: $r" ;; *) ok "MIN_SECONDS=0 disables the check" ;; esac
+setconf MIN_SECONDS 30
+
+echo "  (mark plays nothing)"
+r=$(decide mark)
+case "$r" in *kind=mark*) ok "mark reports itself and exits" ;; *) bad "mark: $r" ;; esac
+case "$r" in *player=*) bad "mark must not choose a player" ;; *) ok "mark chooses no player" ;; esac
+
+echo "  (debounce is configurable)"
+setconf DEBOUNCE_SECONDS 9
+setconf MIN_SECONDS 0
+printf '{}' | HOME="$H" bash "$N" blocked >/dev/null 2>&1
+r=$(printf '{}' | HOME="$H" CLAUDE_NOTIFY_DEBUG=1 bash "$N" blocked 2>/dev/null | tr -d '\r')
+case "$r" in *suppressed=debounced*) ok "DEBOUNCE_SECONDS suppresses a repeat" ;; *) bad "expected debounced, got: $r" ;; esac
+setconf DEBOUNCE_SECONDS 2
+
+echo "  (speak instead of chime)"
+FAKE="$H/fakebin"; mkdir -p "$FAKE"
+printf '#!/bin/sh\nexit 0\n' > "$FAKE/spd-say"; chmod +x "$FAKE/spd-say"
+setconf SPEAK 1
+rm -f "${TMPDIR:-/tmp}"/claude-notify.*.last
+r=$(printf '{}' | HOME="$H" PATH="$FAKE:$PATH" CLAUDE_NOTIFY_DEBUG=1 bash "$N" blocked 2>/dev/null | tr -d '\r')
+case "$r" in *player=spd-say*) ok "SPEAK=1 routes through a speech synthesiser" ;; *) bad "expected spd-say, got: $r" ;; esac
+setconf SPEAK 0
+
+echo "  (a malicious config cannot execute anything)"
+printf 'MIN_SECONDS=0\nMUTE=`touch %s/pwned`\n' "$H" >> "$C"
+rm -f "${TMPDIR:-/tmp}"/claude-notify.*.last
+printf '{}' | HOME="$H" bash "$N" blocked >/dev/null 2>&1 || true
+[ -f "$H/pwned" ] && bad "config file contents were executed" || ok "config is parsed, never sourced"
+
+echo "  (config survives a reinstall)"
+HOME="$H" NO_TEST_TONE=1 NONINTERACTIVE=1 bash "$INSTALLER" >/dev/null 2>&1
+grep -q 'pwned' "$C" && ok "existing config left untouched by reinstall" || bad "reinstall overwrote the config"
 rm -rf "$H"
 echo
 
