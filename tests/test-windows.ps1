@@ -258,9 +258,27 @@ Assert ($r -like '*suppressed=debounced*') "DEBOUNCE_SECONDS suppresses a repeat
 Set-Conf 'DEBOUNCE_SECONDS' '2'
 
 Write-Host "  (speak instead of chime)"
+# Headless Windows Server has no audio device, so Speak() throws there and the
+# notifier is supposed to fall back to a chime. Probe the capability first and
+# assert whichever behaviour is actually correct for this machine.
+$speechWorks = $false
+try {
+    Add-Type -AssemblyName System.Speech
+    $probe = New-Object System.Speech.Synthesis.SpeechSynthesizer
+    $probe.Speak(' ')
+    $probe.Dispose()
+    $speechWorks = $true
+} catch { $speechWorks = $false }
+
 Set-Conf 'SPEAK' '1'
 $r = Get-Decision 'blocked'
-Assert ($r -like '*player=speech*') "SPEAK=1 routes through the speech synthesiser"
+if ($speechWorks) {
+    Assert ($r -like '*player=speech*') "SPEAK=1 routes through the speech synthesiser"
+} else {
+    Write-Host "        no working synthesiser on this machine, checking the fallback"
+    Assert ($r -like '*player=SoundPlayer*' -or $r -like '*player=beep*') `
+        "SPEAK=1 falls back to a sound when speech is unavailable"
+}
 Set-Conf 'SPEAK' '0'
 
 Write-Host "  (each kind resolves to a distinct sound)"

@@ -106,7 +106,7 @@ Or edit the file directly. The notifier re-reads it on every alert, so changes t
 | `MIN_SECONDS` | `30` | Stay silent when a turn finished faster than this. Short back-and-forth turns are the main source of alert fatigue. `0` disables the check. |
 | `SUPPRESS_WHEN_FOCUSED` | `1` | Skip the alert when the terminal is already the focused window, on the basis that you are evidently already looking at it. |
 | `PROJECT_PITCH` | `1` | Pick the finish sound from the working directory, so with several terminals open you can tell which project it was. |
-| `SPEAK` | `0` | Read the alert aloud instead of playing a sound. |
+| `SPEAK` | `0` | Read the alert aloud instead of playing a sound. Falls back to the normal chime if no working speech synthesiser is present. |
 | `TOAST_ON_DONE` | `0` | Also raise a desktop notification when a turn merely finishes. |
 | `DEBOUNCE_SECONDS` | `2` | Ignore repeat alerts for this long, so overlapping events do not stutter. |
 | `ALWAYS_ALERT` | `blocked,limit,error` | Kinds that ignore `MIN_SECONDS` and the focus check, because you want to know regardless. |
