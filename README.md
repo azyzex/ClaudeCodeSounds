@@ -1,0 +1,126 @@
+# Claude Code Sounds
+
+Sound alerts for [Claude Code](https://code.claude.com), so you know when it needs you without watching the terminal.
+
+Claude Code is fast enough that the bottleneck is often your attention, not the model. You give it a task, switch to something else, and come back ten minutes later to find it has been sitting there the whole time waiting for you to approve one file edit. Or it finished eight minutes ago. Or it stopped on an error you never saw.
+
+This wires four distinct sounds to four points in Claude Code's lifecycle:
+
+| Sound | Fires when |
+| --- | --- |
+| Soft chime | Claude finished the turn |
+| Alert, twice, plus a desktop notification | Claude is waiting on you: a permission prompt, an idle prompt, or a subagent that needs input |
+| Alarm, plus a desktop notification | You hit your usage limit |
+| Alarm, plus a desktop notification | The turn died on some other API error |
+
+It installs into `~/.claude/settings.json`, so it applies to every project and every terminal with no per-repository setup.
+
+## Install
+
+### Windows (PowerShell)
+
+Read the script first, then run it:
+
+```powershell
+irm https://raw.githubusercontent.com/azyzex/ClaudeCodeSounds/main/install-claude-sound-alerts.ps1 -OutFile install.ps1
+notepad install.ps1
+powershell -ExecutionPolicy Bypass -File .\install.ps1
+```
+
+If you would rather not read it, the one-liner is:
+
+```powershell
+irm https://raw.githubusercontent.com/azyzex/ClaudeCodeSounds/main/install-claude-sound-alerts.ps1 | iex
+```
+
+### Linux and macOS
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/azyzex/ClaudeCodeSounds/main/install-claude-sound-alerts.sh -o install.sh
+less install.sh
+bash install.sh
+```
+
+Either way, restart Claude Code afterwards and run `/hooks` to confirm four entries are listed.
+
+The installer plays a test tone at the end. If you hear it, the audio path works.
+
+## What it changes
+
+Two files, both under `~/.claude`:
+
+- `claude-notify.ps1` or `claude-notify.sh` is created. This is the script that actually picks a sound and plays it.
+- `settings.json` is backed up with a timestamp, then four hook entries are added to it.
+
+The installer merges rather than replaces. Any hooks you already have are left alone. It is safe to re-run: it strips its own entries before writing, so running it twice does not stack duplicates and give you four overlapping chimes.
+
+## Uninstall
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\install-claude-sound-alerts.ps1 -Uninstall
+```
+
+```bash
+bash install-claude-sound-alerts.sh --uninstall
+```
+
+This removes the notifier script and its own hook entries, and leaves the rest of your settings untouched. Timestamped backups are kept either way, so you can always restore by hand.
+
+To silence the alerts temporarily without uninstalling, set `"disableAllHooks": true` in `~/.claude/settings.json`.
+
+## How it works
+
+Claude Code has a [hooks](https://code.claude.com/docs/en/hooks) system: you attach a command to a named point in its lifecycle and it runs deterministically, without the model having to decide to call it. Four events matter here.
+
+- **`Stop`** fires at the end of every turn. No matcher, it always fires.
+- **`Notification`** fires when Claude wants something from you. It takes a matcher on notification type, so this setup listens for `permission_prompt`, `idle_prompt`, `agent_needs_input`, and `elicitation_dialog`, and deliberately ignores the rest. You do not want a chime for `auth_success`.
+- **`StopFailure`** fires when a turn ends on an error, and it takes a matcher on error type. One of the values is `rate_limit`, which means hitting your usage limit can have its own distinct sound instead of being lumped in with every other failure. That is the alert that is genuinely hard to get any other way.
+- **`StopFailure`** again, matched against every remaining error type, for real failures.
+
+Two details make the difference between this being useful and being actively annoying.
+
+**`async: true`.** Without it, Claude Code blocks for the full length of the audio clip at the end of every single turn. You feel it immediately.
+
+**Debouncing.** Several of these events can fire inside the same second, and you get a stutter of overlapping sounds. The notifier keeps a timestamp in the temp directory and ignores anything that arrives within a couple of seconds of the last alert.
+
+## Customising it
+
+Edit `~/.claude/claude-notify.ps1` or `~/.claude/claude-notify.sh` directly. Re-running the installer overwrites it, so keep a copy of your changes.
+
+- **Different sounds.** Each alert kind has a list of candidate sound files and the first one that exists on the machine wins. Put your own file at the front of the list. Windows looks in `C:\Windows\Media`; macOS looks in `~/Library/Sounds` and `/System/Library/Sounds`; Linux looks through the freedesktop sound theme directories.
+- **A notification on every finish too.** Set `$ToastOnDone = $true` in the PowerShell version, or run with `TOAST_ON_DONE=1` in the shell version.
+- **A longer or shorter debounce.** Change the `2.5` seconds in the PowerShell version or the `2` in the shell version.
+
+## Troubleshooting
+
+**Nothing fires at all.** Restart Claude Code first, since settings are read at startup. Then run `claude --debug` and watch for the hook lines as events happen.
+
+**Hooks run but there is no sound.** The notifier falls back to a terminal bell when it cannot find a playable sound file. On a minimal Linux install, the sound theme is often missing:
+
+```bash
+sudo apt install sound-theme-freedesktop libcanberra-gtk-module
+```
+
+On Linux you also need a player that handles `.oga` files. `paplay`, `pw-play`, and `canberra-gtk-play` all do; `aplay` only handles `.wav`.
+
+**No desktop notification on macOS.** `osascript` routes notifications through Script Editor, which fails silently if it lacks notification permission. Run `osascript -e 'display notification "test"'` once, then enable Script Editor under System Settings, Notifications.
+
+**Wrong sound for the wrong event.** Run `/hooks` and check the matcher strings against the [matcher values in the docs](https://code.claude.com/docs/en/hooks). An invalid matcher does not error, it just never matches.
+
+## Requirements
+
+- Claude Code with hooks support
+- Windows: PowerShell 5.1 or later, which ships with Windows 10 and 11
+- Linux and macOS: `bash`, plus `python3` for the installer only. The alerts themselves need no Python. A desktop notification needs `notify-send` on Linux or `osascript` on macOS, but sound works without either.
+
+## Notes and limitations
+
+The two installers are separate scripts rather than one cross-platform script, because the audio and notification paths have nothing in common between Windows and Unix.
+
+There is a cleaner route I did not take. Hooks can return a `terminalSequence` field and let Claude Code emit the notification escape sequence itself, which hands the decision to your terminal emulator and would work identically everywhere. It is worth looking at if you want your existing terminal notification setup to handle this instead of a bespoke script.
+
+The Linux and macOS script is written against the documented behaviour and tested for its JSON handling, debouncing, and uninstall path, but the audio and notification calls have had less real-world exercise than the Windows version. If a sound does not play on your setup, open an issue with your distribution and audio stack and I will add it to the fallback chain.
+
+## License
+
+MIT. See [LICENSE](LICENSE).

@@ -1,0 +1,9 @@
+# local settings backups, in case anyone runs the installer from inside the repo
+*.bak-*
+settings.json
+
+# editor and OS noise
+.vscode/
+.idea/
+Thumbs.db
+.DS_Store
