@@ -2,6 +2,9 @@
 *.bak-*
 settings.json
 
+# personal drafts, not part of the tool
+linkedin-post.md
+
 # editor and OS noise
 .vscode/
 .idea/
