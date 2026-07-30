@@ -244,7 +244,13 @@ printf '#!/bin/sh\nexit 0\n' > "$FAKE/spd-say"; chmod +x "$FAKE/spd-say"
 setconf SPEAK 1
 rm -f "${TMPDIR:-/tmp}"/claude-notify.*.last
 r=$(printf '{}' | HOME="$H" PATH="$FAKE:$PATH" CLAUDE_NOTIFY_DEBUG=1 bash "$N" blocked 2>/dev/null | tr -d '\r')
-case "$r" in *player=spd-say*) ok "SPEAK=1 routes through a speech synthesiser" ;; *) bad "expected spd-say, got: $r" ;; esac
+# Any synthesiser counts. macOS has a real `say`, which the notifier tries ahead
+# of the spd-say stub, so pinning this to spd-say would only pass on Linux.
+case "$r" in
+  *player=say*|*player=spd-say*|*player=espeak*)
+    ok "SPEAK=1 routes through a speech synthesiser" ;;
+  *) bad "expected a speech synthesiser, got: $r" ;;
+esac
 setconf SPEAK 0
 
 echo "  (a malicious config cannot execute anything)"
