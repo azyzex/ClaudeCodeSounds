@@ -235,14 +235,17 @@ switch ($Kind) {
         $fallback = 'Waiting on your input or a permission prompt'
         $icon     = 'Warning'; $freq = 740
     }
+    # The whole point of splitting rate_limit out of StopFailure is that it gets
+    # its own sound, so 'limit' and 'error' must not share a first choice. Keep
+    # the two lists disjoint at the front.
     'limit' {
-        $wavs     = @('Windows Critical Stop.wav','Windows Foreground.wav','chord.wav')
+        $wavs     = @('Windows Critical Stop.wav','Windows Battery Critical.wav','chord.wav')
         $title    = 'Claude hit the usage limit'
         $fallback = 'Rate limited. The turn ended early.'
         $icon     = 'Error'; $freq = 440
     }
     'error' {
-        $wavs     = @('Windows Critical Stop.wav','Windows Hardware Fail.wav','chord.wav')
+        $wavs     = @('Windows Hardware Fail.wav','Windows Foreground.wav','Windows Error.wav','chimes.wav')
         $title    = 'Claude stopped'
         $fallback = 'The turn ended on an API error'
         $icon     = 'Error'; $freq = 494

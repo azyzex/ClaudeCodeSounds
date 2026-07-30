@@ -229,15 +229,18 @@ case "$KIND" in
     FALLBACK="Waiting on your input or a permission prompt"
     REPEAT=1
     ;;
+  # The whole point of splitting rate_limit out of StopFailure is that it gets
+  # its own sound, so 'limit' and 'error' must not share a first choice. Keep
+  # the two lists disjoint at the front, on both platforms.
   limit)
-    MAC_SOUNDS="Basso Sosumi Funk"
-    FD_SOUNDS="suspend-error dialog-error dialog-warning bell"
+    MAC_SOUNDS="Basso Bottle Sosumi"
+    FD_SOUNDS="suspend-error dialog-warning bell"
     TITLE="Claude hit the usage limit"
     FALLBACK="Rate limited. The turn ended early."
     REPEAT=1
     ;;
   error)
-    MAC_SOUNDS="Basso Funk Sosumi"
+    MAC_SOUNDS="Funk Blow Basso"
     FD_SOUNDS="dialog-error suspend-error dialog-warning bell"
     TITLE="Claude stopped"
     FALLBACK="The turn ended on an API error"

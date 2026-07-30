@@ -57,6 +57,7 @@ jobs:
           ls /System/Library/Sounds/*.aiff 2>/dev/null | head -4 || true
 
           fail=0
+          chosen=""
           for kind in done blocked limit error; do
             rm -f "${TMPDIR:-/tmp}"/claude-notify.*.last
             out=$(mktemp); errf=$(mktemp)
@@ -81,6 +82,11 @@ jobs:
               *"sound=none"*)
                 echo "       FAIL no sound file was found at all"; fail=1 ;;
             esac
+
+            # Collect the resolved file so distinctness can be checked below.
+            picked=${report#*sound=}; picked=${picked%% *}
+            chosen="$chosen$picked
+"
             if [ "$(uname -s)" = "Darwin" ]; then
               case "$report" in
                 *player=afplay*) ;;
@@ -88,6 +94,19 @@ jobs:
               esac
             fi
           done
+
+          # Four events are only useful if they sound different. This caught
+          # limit and error resolving to the same file on both macOS and
+          # Windows, which quietly defeated the entire point of giving
+          # rate_limit its own StopFailure matcher.
+          uniq_count=$(printf '%s' "$chosen" | grep -c . || true)
+          distinct=$(printf '%s' "$chosen" | sort -u | grep -c . || true)
+          echo "resolved $uniq_count sounds, $distinct distinct"
+          if [ "$uniq_count" = "4" ] && [ "$distinct" != "4" ]; then
+            echo "FAIL two alert kinds resolve to the same sound file:"
+            printf '%s' "$chosen" | sort | uniq -d | sed 's/^/  /'
+            fail=1
+          fi
 
           # On Linux a working sink is not guaranteed, so report rather than fail.
           if [ "$(uname -s)" = "Linux" ]; then
