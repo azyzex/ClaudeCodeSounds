@@ -1,5 +1,7 @@
 # Claude Code Sounds
 
+[![CI](https://github.com/azyzex/ClaudeCodeSounds/actions/workflows/ci.yml/badge.svg)](https://github.com/azyzex/ClaudeCodeSounds/actions/workflows/ci.yml)
+
 Sound alerts for [Claude Code](https://code.claude.com), so you know when it needs you without watching the terminal.
 
 Claude Code is fast enough that the bottleneck is often your attention, not the model. You give it a task, switch to something else, and come back ten minutes later to find it has been sitting there the whole time waiting for you to approve one file edit. Or it finished eight minutes ago. Or it stopped on an error you never saw.
@@ -113,13 +115,27 @@ On Linux you also need a player that handles `.oga` files. `paplay`, `pw-play`, 
 - Windows: PowerShell 5.1 or later, which ships with Windows 10 and 11
 - Linux and macOS: `bash`, plus `python3` for the installer only. The alerts themselves need no Python. A desktop notification needs `notify-send` on Linux or `osascript` on macOS, but sound works without either.
 
+## Development
+
+Both test suites run the real installer against a throwaway home directory, so they never touch your own `~/.claude`.
+
+```bash
+bash tests/test-unix.sh
+```
+
+```powershell
+powershell -ExecutionPolicy Bypass -File tests\test-windows.ps1
+```
+
+CI runs them on Linux, macOS and Windows, along with `shellcheck` and `PSScriptAnalyzer`. See [CONTRIBUTING.md](CONTRIBUTING.md) for what the tests protect and how to lint the generated notifier scripts.
+
 ## Notes and limitations
 
 The two installers are separate scripts rather than one cross-platform script, because the audio and notification paths have nothing in common between Windows and Unix.
 
 There is a cleaner route I did not take. Hooks can return a `terminalSequence` field and let Claude Code emit the notification escape sequence itself, which hands the decision to your terminal emulator and would work identically everywhere. It is worth looking at if you want your existing terminal notification setup to handle this instead of a bespoke script.
 
-The Linux and macOS script is written against the documented behaviour and tested for its JSON handling, debouncing, and uninstall path, but the audio and notification calls have had less real-world exercise than the Windows version. If a sound does not play on your setup, open an issue with your distribution and audio stack and I will add it to the fallback chain.
+The Linux and macOS script is exercised by CI on real Linux and macOS runners, covering the settings merge, idempotency, uninstall, sound-file selection and the player fallback chain. What CI cannot cover is audio itself: the runners have no audio device, so the moment a player actually opens a sink is still the least proven part of this. If a sound does not play on your setup, open an issue with your distribution and audio stack and I will add it to the fallback chain.
 
 ## License
 

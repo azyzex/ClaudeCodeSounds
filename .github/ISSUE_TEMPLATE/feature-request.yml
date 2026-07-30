@@ -1,0 +1,35 @@
+name: Feature request
+description: Suggest an alert, an event, or an option.
+title: "Feature: "
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What is the problem
+      description: Describe the situation where the current alerts fall short, rather than the solution you have in mind. It usually leads somewhere better.
+    validations:
+      required: true
+
+  - type: textarea
+    id: idea
+    attributes:
+      label: What you would like it to do
+    validations:
+      required: true
+
+  - type: input
+    id: event
+    attributes:
+      label: Relevant hook event, if you know it
+      description: "See https://code.claude.com/docs/en/hooks for the full list."
+      placeholder: "PreCompact, SubagentStop, PermissionDenied, ..."
+
+  - type: checkboxes
+    id: platforms
+    attributes:
+      label: Platforms this would need to work on
+      options:
+        - label: Windows
+        - label: Linux
+        - label: macOS

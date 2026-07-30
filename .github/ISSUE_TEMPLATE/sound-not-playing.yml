@@ -1,0 +1,104 @@
+name: A sound is not playing
+description: The hooks fire but you hear nothing, or you hear the wrong thing.
+title: "No sound: "
+labels: ["sound"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        The notifier walks a list of candidate sound files and a list of players,
+        and falls back to a terminal bell when none of them work. Almost every
+        report comes down to which of those exist on your machine, so the
+        questions below are the ones that actually narrow it down.
+
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options:
+        - Windows
+        - Linux
+        - macOS
+    validations:
+      required: true
+
+  - type: input
+    id: distro
+    attributes:
+      label: Distribution and version
+      description: On Linux, the output of `cat /etc/os-release | head -2`. On macOS, `sw_vers -productVersion`. On Windows, `winver`.
+      placeholder: "Ubuntu 24.04 / macOS 15.1 / Windows 11 23H2"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: audio
+    attributes:
+      label: Audio stack
+      description: Linux only. Leave as Not applicable elsewhere.
+      options:
+        - Not applicable
+        - PipeWire
+        - PulseAudio
+        - ALSA only
+        - Not sure
+    validations:
+      required: true
+
+  - type: textarea
+    id: players
+    attributes:
+      label: Which players are installed
+      description: |
+        Linux and macOS:
+        ```
+        for p in afplay paplay pw-play canberra-gtk-play ffplay aplay; do command -v $p; done
+        ```
+      render: shell
+
+  - type: textarea
+    id: sounds
+    attributes:
+      label: Which sound files exist
+      description: |
+        Linux: `ls /usr/share/sounds/freedesktop/stereo/ | head`
+        macOS: `ls /System/Library/Sounds/`
+        Windows: `dir C:\Windows\Media`
+      render: shell
+
+  - type: textarea
+    id: hooks
+    attributes:
+      label: Output of /hooks
+      description: Run `/hooks` inside Claude Code and paste what it lists. This confirms whether the hooks are even registered.
+      render: text
+    validations:
+      required: true
+
+  - type: textarea
+    id: manual
+    attributes:
+      label: What happens when you run the notifier directly
+      description: |
+        Linux and macOS:
+        ```
+        bash ~/.claude/claude-notify.sh blocked
+        ```
+        Windows:
+        ```
+        powershell -ExecutionPolicy Bypass -File $env:USERPROFILE\.claude\claude-notify.ps1 -Kind blocked
+        ```
+        Paste any output, and say whether you heard anything.
+      render: shell
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: basics
+    attributes:
+      label: Before submitting
+      options:
+        - label: I restarted Claude Code after installing (settings are read at startup)
+          required: true
+        - label: I checked that `disableAllHooks` is not set in `~/.claude/settings.json`
+          required: true

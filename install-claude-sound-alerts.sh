@@ -343,9 +343,15 @@ ok "wrote $NOTIFY_SCRIPT"
 # --------------------------------------------------------------------- test ---
 
 printf '\n'
-step "test tone..."
-rm -f "${TMPDIR:-/tmp}/claude-notify.$(id -u 2>/dev/null || echo 0).last"
-"$NOTIFY_SCRIPT" done </dev/null || true
+# NO_TEST_TONE=1 skips this, for unattended installs and CI.
+if [ "${NO_TEST_TONE:-0}" = "1" ]; then
+  step "test tone skipped (NO_TEST_TONE=1)"
+else
+  step "test tone..."
+  rm -f "${TMPDIR:-/tmp}/claude-notify.$(id -u 2>/dev/null || echo 0).last"
+  # "done" is quoted so it does not read as the shell keyword (shellcheck SC1010).
+  "$NOTIFY_SCRIPT" "done" </dev/null || true
+fi
 
 printf '\n'
 ok "Done. Restart Claude Code, then run /hooks to confirm all four are listed."

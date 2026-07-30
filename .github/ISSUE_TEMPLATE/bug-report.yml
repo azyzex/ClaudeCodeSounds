@@ -1,0 +1,48 @@
+name: Bug report
+description: Something other than audio is broken - the installer, settings.json, uninstall.
+title: "Bug: "
+labels: ["bug"]
+body:
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options:
+        - Windows
+        - Linux
+        - macOS
+    validations:
+      required: true
+
+  - type: input
+    id: shell
+    attributes:
+      label: Shell and version
+      description: "`bash --version | head -1`, or `$PSVersionTable.PSVersion` on Windows."
+      placeholder: "bash 5.2.21 / PowerShell 5.1.19041.4894"
+    validations:
+      required: true
+
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you ran, what you expected, and what happened instead.
+    validations:
+      required: true
+
+  - type: textarea
+    id: output
+    attributes:
+      label: Installer output
+      description: The full output, including any error. Re-run with `bash -x install-claude-sound-alerts.sh` on Unix for a trace.
+      render: shell
+
+  - type: textarea
+    id: settings
+    attributes:
+      label: Relevant part of settings.json
+      description: |
+        The `hooks` section of `~/.claude/settings.json`. Please redact anything private.
+        A timestamped backup from before the install sits next to it as `settings.json.bak-*`, which is useful for comparison.
+      render: json

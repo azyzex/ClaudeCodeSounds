@@ -1,6 +1,6 @@
 <#
 ================================================================================
- Claude Code sound alerts — one-shot installer (Windows / PowerShell)
+ Claude Code sound alerts - one-shot installer (Windows / PowerShell)
 ================================================================================
 
  WHAT IT DOES
@@ -298,9 +298,14 @@ Write-Ok "wrote $notifyScript"
 # --------------------------------------------------------------------- test ---
 
 Write-Host ""
-Write-Step "test tone..."
-Remove-Item (Join-Path $env:TEMP 'claude-notify.last') -Force -ErrorAction SilentlyContinue
-& powershell.exe -NoProfile -ExecutionPolicy Bypass -File $notifyScript -Kind done
+# Set NO_TEST_TONE=1 to skip this, for unattended installs and CI.
+if ($env:NO_TEST_TONE -eq '1') {
+    Write-Step "test tone skipped (NO_TEST_TONE=1)"
+} else {
+    Write-Step "test tone..."
+    Remove-Item (Join-Path $env:TEMP 'claude-notify.last') -Force -ErrorAction SilentlyContinue
+    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $notifyScript -Kind done
+}
 
 Write-Host ""
 Write-Ok "Done. Restart Claude Code, then run /hooks to confirm all four are listed."
