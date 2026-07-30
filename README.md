@@ -43,7 +43,7 @@ less install.sh
 bash install.sh
 ```
 
-Either way, restart Claude Code afterwards and run `/hooks` to confirm the entries are listed: five on Linux and macOS, four on Windows.
+Either way, restart Claude Code afterwards and run `/hooks` to confirm all five entries are listed.
 
 The installer plays a test tone at the end. If you hear it, the audio path works.
 
@@ -53,7 +53,7 @@ Two files, both under `~/.claude`:
 
 - `claude-notify.ps1` or `claude-notify.sh` is created. This is the script that actually picks a sound and plays it.
 - `settings.json` is backed up with a timestamp, then the hook entries are added to it.
-- On Linux and macOS, `claude-notify.conf` is created if absent. Your edits to it are never overwritten.
+- `claude-notify.conf` is created if absent. Your edits to it are never overwritten.
 
 The installer merges rather than replaces. Any hooks you already have are left alone. It is safe to re-run: it strips its own entries before writing, so running it twice does not stack duplicates and give you overlapping chimes.
 
@@ -79,7 +79,7 @@ Claude Code has a [hooks](https://code.claude.com/docs/en/hooks) system: you att
 - **`Notification`** fires when Claude wants something from you. It takes a matcher on notification type, so this setup listens for `permission_prompt`, `idle_prompt`, `agent_needs_input`, and `elicitation_dialog`, and deliberately ignores the rest. You do not want a chime for `auth_success`.
 - **`StopFailure`** fires when a turn ends on an error, and it takes a matcher on error type. One of the values is `rate_limit`, which means hitting your usage limit can have its own distinct sound instead of being lumped in with every other failure. That is the alert that is genuinely hard to get any other way.
 - **`StopFailure`** again, matched against every remaining error type, for real failures.
-- **`UserPromptSubmit`** records when a turn started, so `Stop` can tell a ten-minute turn from a four-second one. It plays nothing. Linux and macOS only, for now.
+- **`UserPromptSubmit`** records when a turn started, so `Stop` can tell a ten-minute turn from a four-second one. It plays nothing.
 
 Two details make the difference between this being useful and being actively annoying.
 
@@ -89,10 +89,14 @@ Two details make the difference between this being useful and being actively ann
 
 ## Options
 
-On Linux and macOS the installer asks about each option the first time you run it, and writes your answers to `~/.claude/claude-notify.conf`. To change them later:
+The installer asks about each option the first time you run it, and writes your answers to `~/.claude/claude-notify.conf`. Same file, same option names on every platform. To change them later:
 
 ```bash
 bash install-claude-sound-alerts.sh --config
+```
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\install-claude-sound-alerts.ps1 -Configure
 ```
 
 Or edit the file directly. The notifier re-reads it on every alert, so changes take effect immediately with no reinstall and no restart. The installer never overwrites an existing config.
@@ -110,31 +114,41 @@ Or edit the file directly. The notifier re-reads it on every alert, so changes t
 
 The config file is parsed, never sourced, so nothing in it can execute.
 
-Two caveats on the focus check. On macOS it compares the frontmost application against a list of known terminals and editors, so it is app-level rather than window-level. On Linux it needs `xdotool` under X11; Wayland exposes no portable way to ask, so there it always alerts. Any uncertainty resolves to "not focused", meaning the failure mode is an alert you did not strictly need rather than a missed one.
+How well the focus check works varies by platform, and it is deliberately conservative: any uncertainty resolves to "not focused", so the failure mode is an alert you did not strictly need rather than a missed one.
+
+- **Windows** compares the foreground window's process against this process's ancestry, so it answers "is *my* terminal in front", not merely "is a terminal in front".
+- **macOS** compares the frontmost application against a list of known terminals and editors, so it is app-level rather than window-level.
+- **Linux** needs `xdotool` under X11. Wayland exposes no portable way to ask, so there it always alerts.
 
 ## Customising the sounds
 
-Edit `~/.claude/claude-notify.ps1` or `~/.claude/claude-notify.sh` directly. Re-running the installer overwrites the notifier, so keep a copy of your changes. Your config file is safe.
+Everything in the table above is a config change. Only the sound files themselves need editing `~/.claude/claude-notify.ps1` or `~/.claude/claude-notify.sh`, and re-running the installer overwrites those, so keep a copy of your changes. Your config file is safe either way.
 
-- **Different sounds.** Each alert kind has a list of candidate sound files and the first one that exists on the machine wins. Put your own file at the front of the list. Windows looks in `C:\Windows\Media`; macOS looks in `~/Library/Sounds` and `/System/Library/Sounds`; Linux looks through the freedesktop sound theme directories.
-- **A notification on every finish too.** Set `$ToastOnDone = $true` in the PowerShell version, or run with `TOAST_ON_DONE=1` in the shell version.
-- **A longer or shorter debounce.** Change the `2.5` seconds in the PowerShell version or the `2` in the shell version.
+Each alert kind has a list of candidate sound files and the first one that exists on the machine wins, so put your own file at the front of the list. Windows looks in `C:\Windows\Media`; macOS looks in `~/Library/Sounds` and `/System/Library/Sounds`; Linux looks through the freedesktop sound theme directories.
+
+The finish sound has several interchangeable candidates so that `PROJECT_PITCH` has something to choose between. Adding more gives it a wider range.
 
 ## Troubleshooting
 
 **Nothing fires at all.** Restart Claude Code first, since settings are read at startup. Then run `claude --debug` and watch for the hook lines as events happen.
 
-**Hooks run but there is no sound.** First find out what the notifier actually decided. On Linux and macOS it will tell you:
+**Hooks run but there is no sound.** First find out what the notifier actually decided. It will tell you:
 
 ```bash
 CLAUDE_NOTIFY_DEBUG=1 ~/.claude/claude-notify.sh blocked
+```
+
+```powershell
+$env:CLAUDE_NOTIFY_DEBUG=1; & "$env:USERPROFILE\.claude\claude-notify.ps1" -Kind blocked
 ```
 
 ```
 kind=blocked sound=/usr/share/sounds/freedesktop/stereo/dialog-warning.oga player=paplay notified=notify-send detail=...
 ```
 
-`sound=none` means no sound file was found. `player=bell` means a file was found but every player either was missing or failed, so it fell back to the terminal bell. That distinction tells you which of the two fixes below you need.
+`sound=none` means no sound file was found. `player=bell` on Unix, or `player=beep` on Windows, means a file was found but playback failed, so it fell back to a raw tone. That distinction tells you which of the two fixes below you need.
+
+A `suppressed=` field instead means it worked exactly as configured and chose to stay quiet: `too-quick` (under `MIN_SECONDS`), `focused`, `debounced`, or `muted`.
 
 On a minimal Linux install, the sound theme is often missing:
 

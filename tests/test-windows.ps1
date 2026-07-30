@@ -80,7 +80,7 @@ Check (Invoke-Installer -Home_ $h) 0 "installer exits 0"
 $s = Join-Path $h '.claude\settings.json'
 Assert (Test-Path $s) "settings.json created"
 Assert (Test-Path (Join-Path $h '.claude\claude-notify.ps1')) "notifier created"
-Check (Get-OurHookCounts $s) "Notification=1; Stop=1; StopFailure=2" "four hook groups across three events"
+Check (Get-OurHookCounts $s) "Notification=1; Stop=1; StopFailure=2; UserPromptSubmit=1" "five hook groups across four events"
 try { Get-Content $s -Raw | ConvertFrom-Json | Out-Null; Ok "settings.json parses as JSON" }
 catch { Bad "settings.json parses as JSON" }
 # A BOM would break strict parsers, so assert the first byte is '{'.
@@ -127,7 +127,7 @@ Write-Host "case 3: re-running is idempotent"
 # --------------------------------------------------------------------------
 Invoke-Installer -Home_ $h | Out-Null
 Invoke-Installer -Home_ $h | Out-Null
-Check (Get-OurHookCounts $s) "Notification=1; PostToolUse=0; Stop=1; StopFailure=2" "still exactly four groups after three runs"
+Check (Get-OurHookCounts $s) "Notification=1; PostToolUse=0; Stop=1; StopFailure=2; UserPromptSubmit=1" "still exactly five groups after three runs"
 Assert ((Get-Content $s -Raw) -like '*somebody-elses-hook*') "other hooks still intact"
 Write-Host ""
 
@@ -163,7 +163,7 @@ $h = New-TempHome
 Invoke-Installer -Home_ $h | Out-Null
 $n = Join-Path $h '.claude\claude-notify.ps1'
 $payload = '{"message":"test payload","session_id":"s1","cwd":"C:\\tmp\\proj"}'
-foreach ($kind in @('done', 'blocked', 'limit', 'error')) {
+foreach ($kind in @('mark', 'done', 'blocked', 'limit', 'error')) {
     Remove-Item (Join-Path $env:TEMP 'claude-notify.last') -Force -ErrorAction SilentlyContinue
     $errFile = Join-Path $env:TEMP "cc-err-$kind.txt"
     $payload | & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $n -Kind $kind 1>$null 2>$errFile
@@ -183,6 +183,105 @@ Write-Host "  (rejects an unknown kind, per ValidateSet)"
 & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $n -Kind bogus-kind *> $null
 Assert ($LASTEXITCODE -ne 0) "unknown kind is rejected"
 Remove-Item $h -Recurse -Force
+Write-Host ""
+
+# --------------------------------------------------------------------------
+Write-Host "case 7: the config file drives behaviour"
+# --------------------------------------------------------------------------
+$h = New-TempHome
+Invoke-Installer -Home_ $h | Out-Null
+$n = Join-Path $h '.claude\claude-notify.ps1'
+$c = Join-Path $h '.claude\claude-notify.conf'
+Assert (Test-Path $c) "config file created"
+
+# Ask the notifier what it decided rather than inferring from a zero exit.
+function Get-Decision {
+    param([string]$Kind, [string]$Payload = '{}')
+    Remove-Item (Join-Path $env:TEMP 'claude-notify.last') -Force -ErrorAction SilentlyContinue
+    $prev = $env:USERPROFILE
+    $env:USERPROFILE = $h
+    $env:CLAUDE_NOTIFY_DEBUG = '1'
+    try {
+        $out = $Payload | & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $n -Kind $Kind 2>$null
+        return ($out | Out-String).Trim()
+    } finally {
+        $env:USERPROFILE = $prev
+        $env:CLAUDE_NOTIFY_DEBUG = $null
+    }
+}
+
+function Set-Conf {
+    param([string]$Key, [string]$Value)
+    $lines = Get-Content $c | ForEach-Object {
+        if ($_ -match "^$Key=") { "$Key=$Value" } else { $_ }
+    }
+    [System.IO.File]::WriteAllLines($c, $lines)
+}
+
+Write-Host "  (mute)"
+Set-Conf 'MUTE' 'done'
+$r = Get-Decision 'done'
+Assert ($r -like '*suppressed=muted*') "MUTE=done silences the finish alert"
+$r = Get-Decision 'blocked'
+Assert ($r -notlike '*suppressed=muted*') "MUTE=done leaves blocked alone"
+Set-Conf 'MUTE' ''
+
+Write-Host "  (elapsed-time threshold)"
+Set-Conf 'MIN_SECONDS' '30'
+Set-Conf 'SUPPRESS_WHEN_FOCUSED' '0'
+$payload = '{"session_id":"t7"}'
+Get-Decision 'mark' $payload | Out-Null
+$r = Get-Decision 'done' $payload
+Assert ($r -like '*suppressed=too-quick*') "a turn under MIN_SECONDS stays silent"
+# blocked is in ALWAYS_ALERT, so the same short turn must still alert.
+Get-Decision 'mark' $payload | Out-Null
+$r = Get-Decision 'blocked' $payload
+Assert ($r -notlike '*suppressed=*') "ALWAYS_ALERT bypasses the threshold"
+Set-Conf 'MIN_SECONDS' '0'
+Get-Decision 'mark' $payload | Out-Null
+$r = Get-Decision 'done' $payload
+Assert ($r -notlike '*too-quick*') "MIN_SECONDS=0 disables the check"
+
+Write-Host "  (mark plays nothing)"
+$r = Get-Decision 'mark'
+Assert ($r -like '*kind=mark*')  "mark reports itself and exits"
+Assert ($r -notlike '*player=*') "mark chooses no player"
+
+Write-Host "  (debounce is configurable)"
+Set-Conf 'DEBOUNCE_SECONDS' '9'
+Get-Decision 'blocked' | Out-Null
+# Deliberately not via Get-Decision, which clears the stamp first.
+$env:USERPROFILE = $h; $env:CLAUDE_NOTIFY_DEBUG = '1'
+$r = ('{}' | & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $n -Kind blocked 2>$null | Out-String).Trim()
+$env:CLAUDE_NOTIFY_DEBUG = $null
+Assert ($r -like '*suppressed=debounced*') "DEBOUNCE_SECONDS suppresses a repeat"
+Set-Conf 'DEBOUNCE_SECONDS' '2'
+
+Write-Host "  (speak instead of chime)"
+Set-Conf 'SPEAK' '1'
+$r = Get-Decision 'blocked'
+Assert ($r -like '*player=speech*') "SPEAK=1 routes through the speech synthesiser"
+Set-Conf 'SPEAK' '0'
+
+Write-Host "  (each kind resolves to a distinct sound)"
+Set-Conf 'PROJECT_PITCH' '0'
+$sounds = @()
+foreach ($k in @('done','blocked','limit','error')) {
+    $d = Get-Decision $k
+    if ($d -match 'sound=(.+?) player=') { $sounds += $matches[1] }
+}
+Check $sounds.Count 4 "all four kinds reported a sound"
+Check (($sounds | Sort-Object -Unique).Count) 4 "all four sounds are different"
+
+Write-Host "  (a malicious config cannot execute anything)"
+Add-Content $c "MUTE=`$(New-Item -ItemType File -Path '$h\pwned')"
+Get-Decision 'blocked' | Out-Null
+Assert (-not (Test-Path (Join-Path $h 'pwned'))) "config is parsed, never invoked"
+
+Write-Host "  (config survives a reinstall)"
+Invoke-Installer -Home_ $h | Out-Null
+Assert ((Get-Content $c -Raw) -like '*pwned*') "existing config left untouched by reinstall"
+Remove-Item $h -Recurse -Force -ErrorAction SilentlyContinue
 Write-Host ""
 
 # --------------------------------------------------------------------------

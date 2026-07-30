@@ -1,3 +1,4 @@
+
 # Contributing
 
 Thanks for looking. This is a small project with a narrow job: make Claude Code tell you when it needs you, on any platform, without becoming annoying.
