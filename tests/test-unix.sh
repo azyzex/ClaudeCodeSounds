@@ -375,7 +375,9 @@ for k in "done" blocked limit error; do
 done
 
 # Distinct sounds are what make four events worth having.
-sounds=$(for k in "done" blocked limit error; do basename "$(field "$(decide "$k")" sound)"; done | sort -u | wc -l)
+# tr strips the padding BSD wc adds, which GNU wc does not.
+sounds=$(for k in "done" blocked limit error; do basename "$(field "$(decide "$k")" sound)"; done \
+         | sort -u | wc -l | tr -d ' ')
 check "$sounds" "4" "the four kinds resolve to four different sounds"
 
 unset CLAUDE_NOTIFY_DRYRUN
