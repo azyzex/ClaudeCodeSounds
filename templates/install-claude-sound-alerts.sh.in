@@ -1,0 +1,348 @@
+#!/usr/bin/env bash
+# =============================================================================
+#  Claude Code sound alerts - one-shot installer (Linux / macOS)
+# =============================================================================
+#
+#  WHAT IT DOES
+#    Makes Claude Code play a sound when it:
+#      - finishes a turn                  (soft chime)
+#      - needs your input or permission   (alert + desktop notification)
+#      - hits your usage limit            (alarm + desktop notification)
+#      - dies on any other API error      (alarm + desktop notification)
+#
+#  HOW TO RUN
+#    Read it first, then run it:
+#
+#      curl -fsSL https://raw.githubusercontent.com/azyzex/ClaudeCodeSounds/main/install-claude-sound-alerts.sh -o install.sh
+#      less install.sh
+#      bash install.sh
+#
+#  WHAT IT TOUCHES
+#    ~/.claude/claude-notify.sh     created / overwritten
+#    ~/.claude/claude-notify.conf   created if absent, never overwritten
+#    ~/.claude/settings.json        backed up, then hook entries added
+#
+#  SAFE TO RE-RUN. It replaces its own hook entries and leaves everything
+#  else in settings.json alone. Your config file is left alone too.
+#
+#  OPTIONS
+#    --config        change the options without reinstalling
+#    --uninstall     remove the hooks and the notifier
+#    NONINTERACTIVE=1  never prompt, just take the defaults
+# =============================================================================
+
+set -euo pipefail
+
+CLAUDE_DIR="$HOME/.claude"
+NOTIFY_SCRIPT="$CLAUDE_DIR/claude-notify.sh"
+CONF_FILE="$CLAUDE_DIR/claude-notify.conf"
+SETTINGS="$CLAUDE_DIR/settings.json"
+MARKER="claude-notify.sh"    # how we recognise our own hook entries
+
+MODE="install"
+case "${1:-}" in
+  --uninstall|-u) MODE="uninstall" ;;
+  --config|-c)    MODE="config" ;;
+  '') ;;
+  *) printf 'unknown option: %s\nusage: bash %s [--config|--uninstall]\n' "$1" "$(basename "$0")" >&2; exit 2 ;;
+esac
+
+step() { printf '  \033[36m%s\033[0m\n' "$1"; }
+ok()   { printf '  \033[32m%s\033[0m\n' "$1"; }
+dim()  { printf '  \033[90m%s\033[0m\n' "$1"; }
+die()  { printf '  \033[31m%s\033[0m\n' "$1" >&2; exit 1; }
+
+printf '\nClaude Code sound alerts\n------------------------\n'
+
+PY=""
+for c in python3 python; do
+  if command -v "$c" >/dev/null 2>&1; then PY="$c"; break; fi
+done
+[ -n "$PY" ] || die "python3 not found. It is needed by this installer (not by the alerts themselves)."
+
+mkdir -p "$CLAUDE_DIR"
+
+# --------------------------------------------------------------- options ---
+# Defaults, overridden by anything already in the config file, then by the
+# interactive picker. Keep these in sync with the comments written into the
+# config file further down.
+MIN_SECONDS=30
+SUPPRESS_WHEN_FOCUSED=1
+PROJECT_PITCH=1
+SPEAK=0
+TOAST_ON_DONE=0
+DEBOUNCE_SECONDS=2
+ALWAYS_ALERT="blocked,limit,error"
+MUTE=""
+
+# Read a KEY=value out of the config file. Never sources it, so a stray
+# backtick in someone's config cannot execute anything.
+conf_get() {
+  [ -f "$CONF_FILE" ] || return 0
+  sed -n "s/^[[:space:]]*$1[[:space:]]*=[[:space:]]*//p" "$CONF_FILE" \
+    | tail -1 | tr -d '\r' | sed 's/[[:space:]]*$//'
+}
+
+load_conf() {
+  [ -f "$CONF_FILE" ] || return 0
+  for key in MIN_SECONDS SUPPRESS_WHEN_FOCUSED PROJECT_PITCH SPEAK \
+             TOAST_ON_DONE DEBOUNCE_SECONDS ALWAYS_ALERT MUTE; do
+    v=$(conf_get "$key")
+    # An explicit if, not `[ -n "$v" ] && eval ...`: MUTE is empty by default and
+    # is last in the list, so the short-circuit would make the loop return
+    # non-zero and set -e would kill the script.
+    if [ -n "$v" ]; then eval "$key=\$v"; fi
+  done
+}
+load_conf
+
+# Prompt only when there is a real terminal to prompt on. Piping the script
+# through `curl | bash` leaves stdin as the pipe, and CI captures stdout, so
+# both of those correctly fall through to the defaults instead of hanging.
+can_prompt() {
+  [ "${NONINTERACTIVE:-0}" != "1" ] && [ -t 1 ] && [ -r /dev/tty ]
+}
+
+ask_yn() {  # ask_yn <prompt> <current 0|1>
+  local prompt="$1" current="$2" hint reply
+  if [ "$current" = "1" ]; then hint="Y/n"; else hint="y/N"; fi
+  printf '  %s [%s] ' "$prompt" "$hint" > /dev/tty
+  read -r reply < /dev/tty || reply=""
+  case "$reply" in
+    [Yy]*) printf '1' ;;
+    [Nn]*) printf '0' ;;
+    *)     printf '%s' "$current" ;;
+  esac
+}
+
+ask_num() {  # ask_num <prompt> <current>
+  local prompt="$1" current="$2" reply
+  printf '  %s [%s] ' "$prompt" "$current" > /dev/tty
+  read -r reply < /dev/tty || reply=""
+  case "$reply" in
+    ''|*[!0-9]*) printf '%s' "$current" ;;
+    *)           printf '%s' "$reply" ;;
+  esac
+}
+
+choose_options() {
+  printf '\n'
+  step "Options. Press enter to keep the value in brackets."
+  printf '\n'
+  dim 'Every one of these can be changed later by editing'
+  dim "$CONF_FILE"
+  dim 'or by re-running this script with --config. No reinstall needed.'
+  printf '\n'
+
+  MIN_SECONDS=$(ask_num "Stay quiet if a turn finished in under N seconds (0 = always chime)" "$MIN_SECONDS")
+  SUPPRESS_WHEN_FOCUSED=$(ask_yn "Skip the sound when the terminal is already focused?" "$SUPPRESS_WHEN_FOCUSED")
+  PROJECT_PITCH=$(ask_yn "Use a different finish sound per project?" "$PROJECT_PITCH")
+  SPEAK=$(ask_yn "Read the alert aloud instead of playing a sound?" "$SPEAK")
+  TOAST_ON_DONE=$(ask_yn "Also show a desktop notification when a turn just finishes?" "$TOAST_ON_DONE")
+  printf '\n'
+}
+
+write_conf() {
+  # Written once. Re-running the installer must not stamp on someone's edits,
+  # so this only ever creates the file; --config rewrites it deliberately.
+  cat > "$CONF_FILE" <<EOF
+# Claude Code sound alerts - options
+#
+# Edit a value and save. The notifier re-reads this file on every alert, so
+# changes take effect immediately with no reinstall and no restart. Delete a
+# line to go back to its default. Re-run the installer with --config to be
+# walked through these again.
+
+# Stay silent when a turn finished faster than this many seconds. Short
+# back-and-forth turns are the main source of alert fatigue. 0 = always alert.
+MIN_SECONDS=$MIN_SECONDS
+
+# Skip the alert when the terminal is already the focused window, on the basis
+# that you are evidently already looking at it. Works on macOS and on X11.
+# Wayland exposes no portable way to ask, so there it always alerts.
+SUPPRESS_WHEN_FOCUSED=$SUPPRESS_WHEN_FOCUSED
+
+# Pick the "finished" sound from the working directory, so with several
+# terminals open you can tell which project it was.
+PROJECT_PITCH=$PROJECT_PITCH
+
+# Read the alert aloud (say on macOS, spd-say or espeak on Linux) instead of
+# playing a sound file.
+SPEAK=$SPEAK
+
+# Also raise a desktop notification when a turn merely finishes, not just when
+# something needs you.
+TOAST_ON_DONE=$TOAST_ON_DONE
+
+# Ignore repeat alerts for this many seconds, so overlapping events do not
+# stutter over each other.
+DEBOUNCE_SECONDS=$DEBOUNCE_SECONDS
+
+# Alert kinds that ignore MIN_SECONDS and the focus check, because you want to
+# know regardless. Comma separated, from: done blocked limit error
+ALWAYS_ALERT=$ALWAYS_ALERT
+
+# Alert kinds to silence completely. Comma separated, same names as above.
+MUTE=$MUTE
+EOF
+}
+
+if [ "$MODE" = "config" ]; then
+  if ! can_prompt; then
+    die "--config needs a terminal. Edit $CONF_FILE directly instead."
+  fi
+  choose_options
+  write_conf
+  ok "saved $CONF_FILE"
+  dim 'Takes effect on the next alert. No restart needed.'
+  printf '\n'
+  exit 0
+fi
+
+if [ "$MODE" = "install" ]; then
+  if [ -f "$CONF_FILE" ]; then
+    step "keeping your existing options in $(basename "$CONF_FILE")"
+    dim 'run with --config to change them'
+  elif can_prompt; then
+    choose_options
+    write_conf
+    ok "wrote $(basename "$CONF_FILE")"
+  else
+    write_conf
+    step "wrote $(basename "$CONF_FILE") with defaults"
+    dim 'no terminal to prompt on; run with --config to choose options'
+  fi
+fi
+
+# ------------------------------------------------------------ settings.json ---
+
+if [ -f "$SETTINGS" ]; then
+  BACKUP="$SETTINGS.bak-$(date +%Y%m%d-%H%M%S)"
+  cp "$SETTINGS" "$BACKUP"
+  step "backed up settings.json -> $(basename "$BACKUP")"
+fi
+
+# Merge rather than replace: any hooks you already have survive. Our own entries
+# are stripped first (recognised by the marker), so re-running never stacks
+# duplicates and gives you overlapping chimes.
+CLAUDE_SETTINGS="$SETTINGS" \
+CLAUDE_MARKER="$MARKER" \
+CLAUDE_UNINSTALL="$([ "$MODE" = "uninstall" ] && echo 1 || echo 0)" \
+"$PY" <<'PYEOF'
+import json, os, sys
+
+settings_path = os.environ['CLAUDE_SETTINGS']
+marker        = os.environ['CLAUDE_MARKER']
+uninstall     = os.environ['CLAUDE_UNINSTALL'] == '1'
+
+settings = {}
+if os.path.exists(settings_path):
+    with open(settings_path, encoding='utf-8-sig') as f:
+        raw = f.read().strip()
+    if raw:
+        try:
+            settings = json.loads(raw)
+        except ValueError as e:
+            sys.exit("settings.json is not valid JSON. Fix or move it, then re-run. (%s)" % e)
+
+if not isinstance(settings, dict):
+    settings = {}
+hooks = settings.get('hooks')
+if not isinstance(hooks, dict):
+    hooks = settings['hooks'] = {}
+
+# Matcher values come from the hooks reference:
+# https://code.claude.com/docs/en/hooks
+#
+# UserPromptSubmit only records a start time, so the Stop hook can tell a
+# ten-minute turn from a four-second one. It plays nothing.
+# StopFailure filters on error type, which is what lets rate_limit have its own
+# sound instead of being lumped in with every other failure.
+WIRING = [
+    ('UserPromptSubmit', 'mark',    None),
+    ('Stop',             'done',    None),
+    ('Notification',     'blocked', 'permission_prompt|idle_prompt|agent_needs_input|elicitation_dialog'),
+    ('StopFailure',      'limit',   'rate_limit'),
+    ('StopFailure',      'error',   'overloaded|authentication_failed|oauth_org_not_allowed|billing_error|'
+                                    'invalid_request|model_not_found|server_error|max_output_tokens|unknown'),
+]
+
+# Elicitation is listed only so the cleanup pass removes it. Notification
+# already covers it through the elicitation_dialog matcher.
+OUR_EVENTS = ['UserPromptSubmit', 'Stop', 'Notification', 'StopFailure', 'Elicitation']
+
+def is_ours(group):
+    return marker in json.dumps(group)
+
+for event in OUR_EVENTS:
+    if event in hooks:
+        kept = [g for g in hooks[event] if not is_ours(g)]
+        if kept:
+            hooks[event] = kept
+        else:
+            del hooks[event]
+
+if not uninstall:
+    for event, kind, matcher in WIRING:
+        group = {
+            'hooks': [{
+                'type': 'command',
+                # Shell form (no "args"), so sh -c expands $HOME. async keeps
+                # Claude from blocking for the length of the audio clip.
+                'command': '"$HOME/.claude/claude-notify.sh" %s' % kind,
+                'async': True,
+                'timeout': 30,
+            }]
+        }
+        if matcher:
+            group['matcher'] = matcher
+        hooks.setdefault(event, []).append(group)
+
+if not hooks:
+    settings.pop('hooks', None)
+
+with open(settings_path, 'w', encoding='utf-8') as f:
+    json.dump(settings, f, indent=2)
+    f.write('\n')
+PYEOF
+
+if [ "$MODE" = "uninstall" ]; then
+  rm -f "$NOTIFY_SCRIPT"
+  ok "removed. restart Claude Code."
+  dim "left $(basename "$CONF_FILE") in place, in case you reinstall"
+  printf '\n'
+  exit 0
+fi
+
+ok "wired 5 hooks into settings.json"
+
+# ----------------------------------------------------- the notifier script ---
+
+cat > "$NOTIFY_SCRIPT" <<'NOTIFYEOF'
+@@NOTIFIER_SH@@
+NOTIFYEOF
+
+chmod +x "$NOTIFY_SCRIPT"
+ok "wrote $(basename "$NOTIFY_SCRIPT")"
+
+# --------------------------------------------------------------------- test ---
+
+printf '\n'
+# NO_TEST_TONE=1 skips this, for unattended installs and CI.
+if [ "${NO_TEST_TONE:-0}" = "1" ]; then
+  step "test tone skipped (NO_TEST_TONE=1)"
+else
+  step "test tone..."
+  rm -f "${TMPDIR:-/tmp}/claude-notify.$(id -u 2>/dev/null || echo 0).last"
+  # "blocked" rather than "done" because it is in ALWAYS_ALERT by default, so it
+  # bypasses the elapsed-time and focus checks and you actually hear something.
+  printf '{}' | "$NOTIFY_SCRIPT" "blocked" >/dev/null 2>&1 || true
+fi
+
+printf '\n'
+ok "Done. Restart Claude Code, then run /hooks to confirm five entries are listed."
+dim "Change options:      bash $(basename "$0") --config"
+dim "Or edit directly:    $CONF_FILE"
+dim 'Why was I not told?  CLAUDE_NOTIFY_DEBUG=1 ~/.claude/claude-notify.sh done'
+dim 'Silence everything:  set "disableAllHooks": true in settings.json'
+printf '\n'

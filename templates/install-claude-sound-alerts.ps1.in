@@ -1,0 +1,368 @@
+<#
+================================================================================
+ Claude Code sound alerts - one-shot installer (Windows / PowerShell)
+================================================================================
+
+ WHAT IT DOES
+   Makes Claude Code play a sound when it:
+     - finishes a turn                      (soft chime)
+     - needs your input or permission       (alert + tray popup)
+     - hits your usage limit                (alarm + tray popup)
+     - dies on any other API error          (alarm + tray popup)
+
+ HOW TO RUN
+   Open PowerShell and paste:
+
+     irm https://raw.githubusercontent.com/azyzex/ClaudeCodeSounds/main/install-claude-sound-alerts.ps1 | iex
+
+   Or save this file and run:
+
+     powershell -ExecutionPolicy Bypass -File .\install-claude-sound-alerts.ps1
+
+ WHAT IT TOUCHES
+   ~/.claude/claude-notify.ps1     created / overwritten
+   ~/.claude/claude-notify.conf    created if absent, never overwritten
+   ~/.claude/settings.json         backed up, then five hook entries added
+
+ SAFE TO RE-RUN. It replaces its own hook entries and leaves everything
+ else in settings.json alone. Your options file is left alone too.
+
+ OPTIONS
+   -Configure    change the options without reinstalling
+   -Uninstall    remove the hooks and the notifier
+   $env:NONINTERACTIVE = '1'   never prompt, just take the defaults
+================================================================================
+#>
+
+[CmdletBinding()]
+param([switch]$Uninstall, [switch]$Configure)
+
+$ErrorActionPreference = 'Stop'
+
+$claudeDir    = Join-Path $env:USERPROFILE '.claude'
+$notifyScript = Join-Path $claudeDir 'claude-notify.ps1'
+$confFile     = Join-Path $claudeDir 'claude-notify.conf'
+$settingsPath = Join-Path $claudeDir 'settings.json'
+$marker       = 'claude-notify.ps1'   # how we recognise our own hook entries
+
+function Write-Step($msg) { Write-Host "  $msg" -ForegroundColor Cyan }
+function Write-Ok($msg)   { Write-Host "  $msg" -ForegroundColor Green }
+function Write-Dim($msg)  { Write-Host "  $msg" -ForegroundColor DarkGray }
+
+Write-Host ""
+Write-Host "Claude Code sound alerts" -ForegroundColor White
+Write-Host "------------------------"
+
+# ------------------------------------------------------------------ helpers ---
+
+# PowerShell 5.1's ConvertFrom-Json has no -AsHashtable, so convert by hand.
+function ConvertTo-Hashtable {
+    param($InputObject)
+
+    if ($null -eq $InputObject) { return $null }
+
+    if ($InputObject -is [System.Management.Automation.PSCustomObject]) {
+        $h = @{}
+        foreach ($p in $InputObject.PSObject.Properties) {
+            $h[$p.Name] = ConvertTo-Hashtable $p.Value
+        }
+        return $h
+    }
+
+    if ($InputObject -is [System.Collections.IEnumerable] -and $InputObject -isnot [string]) {
+        return @( $InputObject | ForEach-Object { ConvertTo-Hashtable $_ } )
+    }
+
+    return $InputObject
+}
+
+# Write JSON without a UTF-8 BOM. Some parsers choke on the BOM.
+function Save-Json {
+    param([hashtable]$Data, [string]$Path)
+    $json = $Data | ConvertTo-Json -Depth 20
+    [System.IO.File]::WriteAllText($Path, $json, (New-Object System.Text.UTF8Encoding($false)))
+}
+
+# Does this hook group belong to us?
+function Test-IsOurs {
+    param($Group)
+    try { return (($Group | ConvertTo-Json -Depth 20 -Compress) -like "*$marker*") }
+    catch { return $false }
+}
+
+# Strip our entries out of one event, keep everyone else's.
+function Remove-OurHooks {
+    param($Existing)
+    if ($null -eq $Existing) { return @() }
+    return @( @($Existing) | Where-Object { -not (Test-IsOurs $_) } )
+}
+
+function New-HookGroup {
+    param([string]$Kind, [string]$Matcher)
+
+    $handler = @{
+        type    = 'command'
+        command = 'powershell.exe'
+        args    = @(
+            '-NoProfile'
+            '-ExecutionPolicy'
+            'Bypass'
+            '-Command'
+            "& `"`$env:USERPROFILE\.claude\$marker`" -Kind $Kind"
+        )
+        async   = $true
+        timeout = 30
+    }
+
+    $group = @{ hooks = @($handler) }
+    if ($Matcher) { $group['matcher'] = $Matcher }
+    return $group
+}
+
+# ------------------------------------------------------------------ options ---
+# Defaults, overridden by anything already in the config file, then by the
+# interactive picker. Same file, same key names as the Linux and macOS version.
+$opt = [ordered]@{
+    MIN_SECONDS           = '30'
+    SUPPRESS_WHEN_FOCUSED = '1'
+    PROJECT_PITCH         = '1'
+    SPEAK                 = '0'
+    TOAST_ON_DONE         = '0'
+    DEBOUNCE_SECONDS      = '2'
+    ALWAYS_ALERT          = 'blocked,limit,error'
+    MUTE                  = ''
+}
+
+# Read a KEY=value out of the config file. Parsed, never invoked, so a stray
+# expression in someone's config file cannot execute.
+function Read-Conf {
+    if (-not (Test-Path $confFile)) { return }
+    foreach ($line in (Get-Content $confFile)) {
+        if ($line -match '^\s*([A-Z_]+)\s*=\s*(.*?)\s*$') {
+            $k = $matches[1]
+            if ($opt.Contains($k)) { $opt[$k] = $matches[2] }
+        }
+    }
+}
+Read-Conf
+
+# Prompt only when there is a real console to prompt on. Piping the script
+# through `irm | iex` under automation, and CI capturing stdout, both correctly
+# fall through to the defaults instead of hanging.
+function Test-CanPrompt {
+    if ($env:NONINTERACTIVE -eq '1') { return $false }
+    try {
+        if ([Console]::IsOutputRedirected) { return $false }
+        if ([Console]::IsInputRedirected)  { return $false }
+        return [Environment]::UserInteractive
+    } catch { return $false }
+}
+
+function Read-YesNo {
+    param([string]$Prompt, [string]$Current)
+    $hint = if ($Current -eq '1') { 'Y/n' } else { 'y/N' }
+    $reply = Read-Host "  $Prompt [$hint]"
+    switch -Regex ($reply) {
+        '^[Yy]' { return '1' }
+        '^[Nn]' { return '0' }
+        default { return $Current }
+    }
+}
+
+function Read-Number {
+    param([string]$Prompt, [string]$Current)
+    $reply = Read-Host "  $Prompt [$Current]"
+    if ($reply -match '^\d+$') { return $reply }
+    return $Current
+}
+
+function Select-Options {
+    Write-Host ""
+    Write-Step "Options. Press enter to keep the value in brackets."
+    Write-Host ""
+    Write-Dim "Every one of these can be changed later by editing"
+    Write-Dim "$confFile"
+    Write-Dim "or by re-running this script with -Configure. No reinstall needed."
+    Write-Host ""
+
+    $opt['MIN_SECONDS']           = Read-Number "Stay quiet if a turn finished in under N seconds (0 = always chime)" $opt['MIN_SECONDS']
+    $opt['SUPPRESS_WHEN_FOCUSED'] = Read-YesNo  "Skip the sound when the terminal is already focused?"               $opt['SUPPRESS_WHEN_FOCUSED']
+    $opt['PROJECT_PITCH']         = Read-YesNo  "Use a different finish sound per project?"                          $opt['PROJECT_PITCH']
+    $opt['SPEAK']                 = Read-YesNo  "Read the alert aloud instead of playing a sound?"                   $opt['SPEAK']
+    $opt['TOAST_ON_DONE']         = Read-YesNo  "Also show a tray popup when a turn just finishes?"                  $opt['TOAST_ON_DONE']
+    Write-Host ""
+}
+
+function Save-Conf {
+    $text = @"
+# Claude Code sound alerts - options
+#
+# Edit a value and save. The notifier re-reads this file on every alert, so
+# changes take effect immediately with no reinstall and no restart. Delete a
+# line to go back to its default. Re-run the installer with -Configure to be
+# walked through these again.
+
+# Stay silent when a turn finished faster than this many seconds. Short
+# back-and-forth turns are the main source of alert fatigue. 0 = always alert.
+MIN_SECONDS=$($opt['MIN_SECONDS'])
+
+# Skip the alert when the terminal is already the focused window, on the basis
+# that you are evidently already looking at it.
+SUPPRESS_WHEN_FOCUSED=$($opt['SUPPRESS_WHEN_FOCUSED'])
+
+# Pick the "finished" sound from the working directory, so with several
+# terminals open you can tell which project it was.
+PROJECT_PITCH=$($opt['PROJECT_PITCH'])
+
+# Read the alert aloud instead of playing a sound file.
+SPEAK=$($opt['SPEAK'])
+
+# Also raise a tray popup when a turn merely finishes, not just when something
+# needs you.
+TOAST_ON_DONE=$($opt['TOAST_ON_DONE'])
+
+# Ignore repeat alerts for this many seconds, so overlapping events do not
+# stutter over each other.
+DEBOUNCE_SECONDS=$($opt['DEBOUNCE_SECONDS'])
+
+# Alert kinds that ignore MIN_SECONDS and the focus check, because you want to
+# know regardless. Comma separated, from: done blocked limit error
+ALWAYS_ALERT=$($opt['ALWAYS_ALERT'])
+
+# Alert kinds to silence completely. Comma separated, same names as above.
+MUTE=$($opt['MUTE'])
+"@
+    [System.IO.File]::WriteAllText($confFile, $text, (New-Object System.Text.UTF8Encoding($false)))
+}
+
+# ----------------------------------------------------------------- settings ---
+
+if (-not (Test-Path $claudeDir)) {
+    New-Item -ItemType Directory -Path $claudeDir -Force | Out-Null
+    Write-Step "created $claudeDir"
+}
+
+if ($Configure) {
+    if (-not (Test-CanPrompt)) {
+        Write-Host "  -Configure needs a console. Edit $confFile directly instead." -ForegroundColor Red
+        exit 1
+    }
+    Select-Options
+    Save-Conf
+    Write-Ok "saved $confFile"
+    Write-Dim "Takes effect on the next alert. No restart needed."
+    Write-Host ""
+    exit 0
+}
+
+if (-not $Uninstall) {
+    if (Test-Path $confFile) {
+        Write-Step "keeping your existing options in claude-notify.conf"
+        Write-Dim "run with -Configure to change them"
+    } elseif (Test-CanPrompt) {
+        Select-Options
+        Save-Conf
+        Write-Ok "wrote claude-notify.conf"
+    } else {
+        Save-Conf
+        Write-Step "wrote claude-notify.conf with defaults"
+        Write-Dim "no console to prompt on; run with -Configure to choose options"
+    }
+}
+
+$settings = @{}
+if (Test-Path $settingsPath) {
+    $raw = Get-Content $settingsPath -Raw
+    if ($raw -and $raw.Trim()) {
+        try   { $settings = ConvertTo-Hashtable (ConvertFrom-Json $raw) }
+        catch { throw "settings.json is not valid JSON. Fix or move it, then re-run. ($_)" }
+    }
+    $backup = "$settingsPath.bak-$(Get-Date -Format 'yyyyMMdd-HHmmss')"
+    Copy-Item $settingsPath $backup
+    Write-Step "backed up settings.json -> $(Split-Path $backup -Leaf)"
+}
+
+if (-not ($settings -is [hashtable])) { $settings = @{} }
+if (-not $settings.ContainsKey('hooks') -or -not ($settings['hooks'] -is [hashtable])) {
+    $settings['hooks'] = @{}
+}
+$hooks = $settings['hooks']
+
+# Matcher values come from the hooks reference: code.claude.com/docs/en/hooks
+#
+# UserPromptSubmit only records a start time, so the Stop hook can tell a
+# ten-minute turn from a four-second one. It plays nothing.
+$wiring = @(
+    @{ Event = 'UserPromptSubmit'; Kind = 'mark';    Matcher = $null }
+    @{ Event = 'Stop';             Kind = 'done';    Matcher = $null }
+    @{ Event = 'Notification';     Kind = 'blocked'; Matcher = 'permission_prompt|idle_prompt|agent_needs_input|elicitation_dialog' }
+    @{ Event = 'StopFailure';      Kind = 'limit';   Matcher = 'rate_limit' }
+    @{ Event = 'StopFailure';      Kind = 'error';   Matcher = 'overloaded|authentication_failed|oauth_org_not_allowed|billing_error|invalid_request|model_not_found|server_error|max_output_tokens|unknown' }
+)
+
+# Clear our old entries first, so re-running never stacks duplicates.
+# Elicitation is in the list only to clean up: earlier setups wired it directly,
+# but Notification already covers it via the elicitation_dialog matcher.
+$ourEvents = @('UserPromptSubmit', 'Stop', 'Notification', 'StopFailure', 'Elicitation')
+
+foreach ($evt in $ourEvents) {
+    if ($hooks.ContainsKey($evt)) { $hooks[$evt] = Remove-OurHooks $hooks[$evt] }
+}
+
+if ($Uninstall) {
+    foreach ($evt in $ourEvents) {
+        if ($hooks.ContainsKey($evt) -and @($hooks[$evt]).Count -eq 0) { $hooks.Remove($evt) }
+    }
+    if ($hooks.Count -eq 0) { $settings.Remove('hooks') }
+    Save-Json -Data $settings -Path $settingsPath
+    if (Test-Path $notifyScript) { Remove-Item $notifyScript -Force }
+    Write-Ok "removed. restart Claude Code."
+    Write-Dim "left claude-notify.conf in place, in case you reinstall"
+    Write-Host ""
+    return
+}
+
+foreach ($w in $wiring) {
+    $existing = @()
+    if ($hooks.ContainsKey($w.Event)) { $existing = @($hooks[$w.Event]) }
+    $hooks[$w.Event] = @( $existing + (New-HookGroup -Kind $w.Kind -Matcher $w.Matcher) )
+}
+
+# Don't leave "Elicitation": [] behind after the cleanup pass above.
+foreach ($evt in @($hooks.Keys)) {
+    if (@($hooks[$evt]).Count -eq 0) { $hooks.Remove($evt) }
+}
+
+Save-Json -Data $settings -Path $settingsPath
+Write-Ok "wired 5 hooks into settings.json"
+
+# ------------------------------------------------------- the notifier script ---
+
+$notifyBody = @'
+@@NOTIFIER_PS1@@
+'@
+
+Set-Content -Path $notifyScript -Value $notifyBody -Encoding utf8
+Write-Ok "wrote claude-notify.ps1"
+
+# --------------------------------------------------------------------- test ---
+
+Write-Host ""
+# Set NO_TEST_TONE=1 to skip this, for unattended installs and CI.
+if ($env:NO_TEST_TONE -eq '1') {
+    Write-Step "test tone skipped (NO_TEST_TONE=1)"
+} else {
+    Write-Step "test tone..."
+    Remove-Item (Join-Path $env:TEMP 'claude-notify.last') -Force -ErrorAction SilentlyContinue
+    # 'blocked' rather than 'done' because it is in ALWAYS_ALERT by default, so
+    # it bypasses the elapsed-time and focus checks and you actually hear it.
+    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $notifyScript -Kind blocked
+}
+
+Write-Host ""
+Write-Ok "Done. Restart Claude Code, then run /hooks to confirm all five are listed."
+Write-Dim "Change options:      powershell -File .\install-claude-sound-alerts.ps1 -Configure"
+Write-Dim "Or edit directly:    $confFile"
+Write-Dim "Why was I not told?  `$env:CLAUDE_NOTIFY_DEBUG=1; & `"`$env:USERPROFILE\.claude\claude-notify.ps1`" -Kind done"
+Write-Dim "Silence everything:  set `"disableAllHooks`": true in settings.json"
+Write-Host ""

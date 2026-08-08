@@ -5,7 +5,7 @@ Thanks for looking. This is a small project with a narrow job: make Claude Code 
 
 ## The thing most likely to be useful
 
-Sound and notification coverage on machines I do not have. The Windows path is in daily use. The Linux and macOS path is covered by CI on GitHub's runners, which have no audio device, so the player and notification calls are the least proven part of this. If a sound does not play on your setup, the [sound issue template](.github/ISSUE_TEMPLATE/sound-not-playing.yml) asks for exactly the information needed to add your case to the fallback chain.
+Sound and notification coverage on machines I do not have. The Windows path is in daily use, and CI plays real sound files through real players on Linux and macOS runners. What CI cannot cover is desktop notifications, because its runners have no notification daemon or GUI session, so that is the least proven part of this. If a sound does not play on your setup, the [sound issue template](.github/ISSUE_TEMPLATE/sound-not-playing.yml) asks for exactly the information needed to add your case to the fallback chain.
 
 ## Running the tests
 
@@ -26,16 +26,35 @@ They cover a fresh install, merging into existing settings, idempotency across r
 CI runs both linters and they must be clean.
 
 ```bash
-shellcheck -S warning install-claude-sound-alerts.sh tests/test-unix.sh
+shellcheck -S warning install-claude-sound-alerts.sh notifier/claude-notify.sh tests/test-unix.sh
 ```
 
 ```powershell
 Invoke-ScriptAnalyzer -Path install-claude-sound-alerts.ps1 -Settings .github\PSScriptAnalyzerSettings.psd1
 ```
 
-One wrinkle worth knowing: **the notifier scripts are generated**, written out by the installer from a heredoc. Linters treat that heredoc as inert text and never look inside it, so CI installs into a temp directory first and then lints the file the installer actually emitted. If you change the notifier body, run the linter the same way or the change goes unchecked.
-
 Rule exclusions live in `.github/PSScriptAnalyzerSettings.psd1`, each with the reason it is excluded. If you need another one, add the reason too.
+
+## The installers are generated
+
+**Do not edit `install-claude-sound-alerts.sh` or `install-claude-sound-alerts.ps1` directly.** They are built from two sources:
+
+```
+templates/install-claude-sound-alerts.sh.in   the installer logic
+notifier/claude-notify.sh                     the notifier it writes out
+        |
+        +--> build/generate.py --> install-claude-sound-alerts.sh
+```
+
+Edit the template or the notifier, then regenerate:
+
+```bash
+python build/generate.py
+```
+
+Commit both the source and the regenerated installer. CI runs `python build/generate.py --check` and fails if they have drifted.
+
+This exists because the installers are distributed as one file each, since people pipe them straight from a URL, but the notifier inside them is also what the desktop app ships. Keeping the notifier as a real file means there is one copy rather than two that silently diverge. It has a useful side effect: linters can read the notifiers directly, where previously they treated the heredoc as inert text and skipped it entirely.
 
 ## Things to preserve when editing the installers
 
