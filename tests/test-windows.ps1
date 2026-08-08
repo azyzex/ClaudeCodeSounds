@@ -212,14 +212,22 @@ function Get-Decision {
 
 function Set-Conf {
     param([string]$Key, [string]$Value)
+    # A plain loop rather than ForEach-Object: the analyser cannot follow a
+    # variable assigned inside a pipeline scriptblock and read after it.
+    $out = @()
     $seen = $false
-    $lines = @(Get-Content $c | ForEach-Object {
-        if ($_ -match "^$Key=") { $seen = $true; "$Key=$Value" } else { $_ }
-    })
+    foreach ($line in (Get-Content $c)) {
+        if ($line -match "^$Key=") {
+            $out += "$Key=$Value"
+            $seen = $true
+        } else {
+            $out += $line
+        }
+    }
     # Append when the key is not already there. Without this the helper silently
     # does nothing for any key the installer does not write by default.
-    if (-not $seen) { $lines += "$Key=$Value" }
-    [System.IO.File]::WriteAllLines($c, $lines)
+    if (-not $seen) { $out += "$Key=$Value" }
+    [System.IO.File]::WriteAllLines($c, $out)
 }
 
 Write-Host "  (mute)"
