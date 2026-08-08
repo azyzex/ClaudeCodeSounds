@@ -8,12 +8,12 @@ changing the design is a code change rather than a binary blob swap.
 
     python build/make-icons.py
 
-Writes PNGs and a Windows .ico to app/src-tauri/icons/. Tauri needs specific
-sizes and, on Windows, a real .ico.
+Writes PNGs, a Windows .ico and a macOS .icns to app/src-tauri/icons/. Tauri
+needs specific sizes and, on Windows and macOS, those container formats.
 
 No third-party imaging library: PNG is a handful of chunks around zlib-compressed
-scanlines, and .ico is a small header wrapping PNGs, so both are cheaper to write
-than to depend on.
+scanlines, and both .ico and .icns are small headers wrapping PNGs, so they are
+cheaper to write than to depend on.
 """
 
 import math
@@ -28,6 +28,7 @@ OUT = os.path.join(ROOT, 'app', 'src-tauri', 'icons')
 # Sizes Tauri expects, plus the ones the .ico wants.
 PNG_SIZES = [32, 128, 256, 512]
 ICO_SIZES = [16, 32, 48, 64, 256]
+ICNS_SIZES = [32, 64, 128, 256, 512]
 
 BG_TOP = (99, 91, 255)      # indigo
 BG_BOTTOM = (56, 48, 190)
@@ -144,6 +145,20 @@ def ico_bytes(pngs):
     return header + entries + blobs
 
 
+def icns_bytes(pngs):
+    """An .icns wrapping PNG entries, which macOS 10.7 onward accepts.
+
+    The format is a magic, a total length, then typed chunks. Each type name
+    implies a size, so they have to agree with the PNG that follows.
+    """
+    types = {32: b'ic11', 64: b'ic12', 128: b'ic07', 256: b'ic08', 512: b'ic09'}
+    body = b''
+    for size, data in pngs:
+        tag = types[size]
+        body += tag + struct.pack('>I', len(data) + 8) + data
+    return b'icns' + struct.pack('>I', len(body) + 8) + body
+
+
 def main():
     if not os.path.isdir(OUT):
         os.makedirs(OUT)
@@ -171,6 +186,11 @@ def main():
     with open(os.path.join(OUT, 'icon.ico'), 'wb') as f:
         f.write(ico)
     print('  %-18s %6d bytes' % ('icon.ico', len(ico)))
+
+    icns = icns_bytes([(s, render(s)) for s in ICNS_SIZES])
+    with open(os.path.join(OUT, 'icon.icns'), 'wb') as f:
+        f.write(icns)
+    print('  %-18s %6d bytes' % ('icon.icns', len(icns)))
     return 0
 
 
