@@ -69,7 +69,9 @@ no system sounds at all, CI asserts it, and the scripts are feature-complete.
 - [x] Bundle the scripts and sounds as resources, and write them out on install
 - [x] Recent alert log: what fired, what was suppressed and why
 - [x] Run it, look at it, fix what looks wrong
-- [x] Release workflow producing per-platform installers
+- [x] Release workflow producing per-platform installers (Windows, Linux)
+- [ ] macOS app build, deferred: the runners queued for tens of minutes and
+      held the release behind them. The scripts already work on macOS
 
 **Exit criteria:** a fresh machine with no terminal use gets working alerts, and
 uninstalling the app leaves them working.

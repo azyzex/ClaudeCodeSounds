@@ -23,13 +23,10 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # One universal build rather than one per architecture. Two separate
-          # builds would give smaller downloads, but the Intel runner queues for
-          # tens of minutes and is on its way out, and a release that waits on a
-          # scarce runner is worse than a download twice the size.
-          - os: macos-14
-            label: macOS (universal)
-            target: universal-apple-darwin
+          # macOS is deliberately absent. Its runners queued for tens of
+          # minutes and held the whole release behind them, and an unsigned
+          # .dmg needs a Gatekeeper workaround anyway, so it is being done as a
+          # separate piece of work rather than blocking Windows and Linux.
           - os: ubuntu-22.04
             label: Linux
             target: x86_64-unknown-linux-gnu
@@ -41,15 +38,8 @@ jobs:
         with:
           ref: ${{ github.event.inputs.tag || github.ref }}
 
-      - name: Rust targets
-        shell: bash
-        run: |
-          if [ "${{ matrix.target }}" = "universal-apple-darwin" ]; then
-            # A universal binary is two real targets stitched together.
-            rustup target add aarch64-apple-darwin x86_64-apple-darwin
-          else
-            rustup target add "${{ matrix.target }}"
-          fi
+      - name: Rust target
+        run: rustup target add ${{ matrix.target }}
 
       # Built on the oldest supported Ubuntu on purpose: glibc is backwards
       # compatible but not forwards, so a binary built on a newer release will
@@ -87,7 +77,6 @@ jobs:
             Windows) suffix="windows-x64.msi";     find "$root" -name '*.msi'      -exec cp {} "dist/ClaudeCodeSounds-$version-$suffix" \; ;;
             Linux)   suffix="linux-x86_64.AppImage"; find "$root" -name '*.AppImage' -exec cp {} "dist/ClaudeCodeSounds-$version-$suffix" \;
                      find "$root" -name '*.deb' -exec cp {} "dist/ClaudeCodeSounds-$version-linux-amd64.deb" \; ;;
-            macOS)   find "$root" -name '*.dmg' -exec cp {} "dist/ClaudeCodeSounds-$version-macos-universal.dmg" \; ;;
           esac
           ls -la dist
 
@@ -125,19 +114,18 @@ jobs:
             If you would rather not install anything, the shell and PowerShell
             installers in the repository do the same job.
 
+            **Windows and Linux for now.** A macOS build is coming separately.
+
             **Downloads are per platform.** Pick the one for your machine:
 
             | Platform | File |
             | --- | --- |
             | Windows | `*-windows-x64.msi` |
-            | macOS, Apple Silicon or Intel | `*-macos-universal.dmg` |
             | Linux | `*-linux-x86_64.AppImage` or `*-linux-amd64.deb` |
 
             These builds are **unsigned**, because signing certificates cost
             money and this project does not spend any. That means:
 
-            * **macOS** will say the app is from an unidentified developer.
-              Right-click the app and choose Open the first time, then confirm.
             * **Windows** SmartScreen will warn until enough people have
               installed it. Choose More info, then Run anyway.
             * **Linux** is unaffected. The AppImage needs `chmod +x` before it

@@ -211,13 +211,15 @@ it deliberately stayed quiet for. It can install and remove the hooks itself, so
 a machine that has never run the scripts needs no terminal.
 
 Downloads are per platform, on the [releases page](https://github.com/azyzex/ClaudeCodeSounds/releases):
-`.msi` for Windows, `.dmg` for macOS (one universal build for both Apple Silicon and Intel),
-and `.AppImage` or `.deb` for Linux.
+`.msi` for Windows, and `.AppImage` or `.deb` for Linux. A macOS build is not
+published yet.
 
 The builds are unsigned, because signing certificates cost money and this
-project does not spend any. macOS will call it an unidentified developer, so
-right-click and choose Open the first time; Windows SmartScreen will warn until
-enough people have installed it. Linux is unaffected.
+project does not spend any. Windows SmartScreen will warn until enough people
+have installed it: choose More info, then Run anyway. Linux is unaffected.
+
+The scripts work on macOS today. Only the desktop app is Windows and Linux for
+now.
 
 **The app is optional and never required.** The hooks own the alerting; the app
 only edits the same config file you could edit by hand. Removing the app leaves
