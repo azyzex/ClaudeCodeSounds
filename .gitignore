@@ -10,3 +10,8 @@ linkedin-post.md
 .idea/
 Thumbs.db
 .DS_Store
+
+# app build artefacts
+app/src-tauri/target/
+app/node_modules/
+app/src-tauri/gen/

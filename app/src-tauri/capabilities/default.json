@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "The window only calls this app's own commands. No filesystem, shell or HTTP permissions are granted, because every privileged action goes through a named command in main.rs where it can be validated.",
+  "windows": ["main"],
+  "permissions": ["core:default"]
+}

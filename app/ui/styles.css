@@ -1,0 +1,156 @@
+/* Deliberately restrained. This is a settings window someone opens for ninety
+   seconds to change two values, so legibility and hit targets matter and
+   personality does not. Follows the OS light/dark preference. */
+
+:root {
+  --bg: #f6f6f8;
+  --card: #ffffff;
+  --ink: #16161a;
+  --muted: #63636e;
+  --line: #e2e2e8;
+  --accent: #5b52ef;
+  --accent-ink: #ffffff;
+  --danger: #b3261e;
+  --ok: #1a7f37;
+  --radius: 10px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #16161a;
+    --card: #1e1e24;
+    --ink: #ececf1;
+    --muted: #9a9aa8;
+    --line: #2e2e38;
+    --accent: #8079ff;
+    --accent-ink: #10101a;
+    --danger: #f28b82;
+    --ok: #5dd47f;
+  }
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  padding: 0 20px 32px;
+  background: var(--bg);
+  color: var(--ink);
+  font: 14px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+header {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  padding: 18px 0 12px;
+  background: var(--bg);
+  border-bottom: 1px solid var(--line);
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+h1 { font-size: 17px; margin: 0; letter-spacing: -0.01em; }
+h2 { font-size: 13px; margin: 0 0 4px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
+
+.status { margin: 0; font-size: 13px; color: var(--muted); }
+.status.ok { color: var(--ok); }
+.status.err { color: var(--danger); }
+
+main { max-width: 720px; margin: 0 auto; }
+
+.card {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 16px;
+  margin-top: 16px;
+}
+
+.card.danger { border-color: color-mix(in srgb, var(--danger) 35%, var(--line)); }
+
+.muted { color: var(--muted); margin: 0 0 12px; }
+.mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; }
+code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 0.92em; }
+.hidden { display: none; }
+
+/* Rows -------------------------------------------------------------------- */
+
+.row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 2px 16px;
+  align-items: center;
+  padding: 10px 0;
+  border-top: 1px solid var(--line);
+}
+.row:first-of-type { border-top: 0; }
+.label { font-weight: 500; }
+.hint { grid-column: 1; font-size: 12px; color: var(--muted); }
+.switch-row input[type="checkbox"] { grid-column: 2; grid-row: 1 / span 2; }
+
+/* Events ------------------------------------------------------------------ */
+
+.event {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px 12px;
+  padding: 14px 0;
+  border-top: 1px solid var(--line);
+}
+.event:first-child { border-top: 0; }
+.event-name { font-weight: 600; }
+.event-when { grid-column: 1; font-size: 12px; color: var(--muted); margin-top: -6px; }
+.event-controls {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 14px;
+}
+.event.off .event-controls { opacity: 0.45; pointer-events: none; }
+
+.control { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); }
+.control select, .control input[type="range"] { margin: 0; }
+
+/* Controls ---------------------------------------------------------------- */
+
+input[type="number"], input[type="text"], select {
+  font: inherit;
+  color: var(--ink);
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  padding: 5px 8px;
+}
+.num { width: 68px; }
+.text { width: 140px; }
+.select { min-width: 120px; }
+
+input[type="range"] { width: 110px; accent-color: var(--accent); }
+input[type="checkbox"] { width: 18px; height: 18px; accent-color: var(--accent); }
+
+input:focus-visible, select:focus-visible, button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+button {
+  font: inherit;
+  font-weight: 500;
+  color: var(--ink);
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 7px 13px;
+  cursor: pointer;
+}
+button:hover { border-color: var(--accent); }
+button.primary { background: var(--accent); color: var(--accent-ink); border-color: transparent; }
+button.play { padding: 5px 11px; }
+button:disabled { opacity: 0.5; cursor: default; border-color: var(--line); }
+
+footer { max-width: 720px; margin: 18px auto 0; }

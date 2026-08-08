@@ -1,0 +1,29 @@
+[package]
+name = "claude-code-sounds"
+version = "0.1.0"
+description = "Configure Claude Code sound alerts"
+authors = ["Mohamed Aziz Guenni"]
+license = "MIT"
+edition = "2021"
+rust-version = "1.77"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[features]
+# Used by the Tauri CLI when producing a release bundle.
+custom-protocol = ["tauri/custom-protocol"]
+
+[profile.release]
+# The whole argument for Tauri over Electron is size, so it is worth the
+# slightly longer build.
+opt-level = "s"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true

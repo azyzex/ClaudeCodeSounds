@@ -141,6 +141,60 @@ jobs:
       - name: Check the committed installers are up to date
         run: python3 build/generate.py --check
 
+  app:
+    name: app (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      # Tauri needs the system webview and its build dependencies on Linux.
+      # Windows and macOS already have theirs.
+      - name: Linux build dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq \
+            libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            app/src-tauri/target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('app/src-tauri/Cargo.toml') }}
+          restore-keys: ${{ runner.os }}-cargo-
+
+      - name: Icons are reproducible from build/make-icons.py
+        if: runner.os == 'Linux'
+        run: |
+          python3 build/make-icons.py >/dev/null
+          git diff --exit-code -- app/src-tauri/icons \
+            || { echo "icons differ from what make-icons.py produces; commit the regenerated files"; exit 1; }
+
+      # Reported, not enforced: there is no Rust toolchain on the machine this
+      # was written on, so the formatter cannot be run before pushing. Turn this
+      # into `cargo fmt --check` once that changes.
+      - name: Formatting (advisory)
+        working-directory: app/src-tauri
+        continue-on-error: true
+        run: cargo fmt --check
+
+      - name: Clippy
+        working-directory: app/src-tauri
+        run: cargo clippy --all-targets -- -D warnings
+
+      # The config and hooks modules are where the real logic lives, and they
+      # have to agree with the installer scripts about the file formats.
+      - name: Tests
+        working-directory: app/src-tauri
+        run: cargo test
+
   lint-shell:
     name: lint (shellcheck)
     runs-on: ubuntu-latest

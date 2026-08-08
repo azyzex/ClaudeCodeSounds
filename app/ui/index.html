@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Claude Code Sounds</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header>
+    <h1>Claude Code Sounds</h1>
+    <p id="status" class="status" role="status">Loading…</p>
+  </header>
+
+  <main>
+    <section id="setup" class="card hidden">
+      <h2>Not installed yet</h2>
+      <p class="muted">
+        The alerts are hooks in <code>~/.claude/settings.json</code>. They run
+        whether or not this app is open, and keep working if you remove it.
+      </p>
+      <button id="install" class="primary">Install the alerts</button>
+    </section>
+
+    <section class="card">
+      <h2>Alerts</h2>
+      <p class="muted">Press play to hear a change straight away.</p>
+      <div id="events"></div>
+    </section>
+
+    <section class="card">
+      <h2>When to stay quiet</h2>
+
+      <label class="row">
+        <span class="label">
+          Stay silent under
+          <input type="number" id="MIN_SECONDS" min="0" max="600" class="num" />
+          seconds
+        </span>
+        <span class="hint">Short back-and-forth turns are the main source of alert fatigue. 0 disables this.</span>
+      </label>
+
+      <label class="row switch-row">
+        <span class="label">Skip alerts when the terminal is focused</span>
+        <span class="hint">You are evidently already looking at it.</span>
+        <input type="checkbox" id="SUPPRESS_WHEN_FOCUSED" />
+      </label>
+
+      <label class="row switch-row">
+        <span class="label">Different finish sound per project</span>
+        <span class="hint">With several terminals open, you can tell which one it was.</span>
+        <input type="checkbox" id="PROJECT_PITCH" />
+      </label>
+
+      <label class="row switch-row">
+        <span class="label">Read alerts aloud</span>
+        <span class="hint">Falls back to the normal sound if no speech synthesiser is available.</span>
+        <input type="checkbox" id="SPEAK" />
+      </label>
+
+      <label class="row switch-row">
+        <span class="label">Desktop notification when a turn merely finishes</span>
+        <span class="hint">Anything that needs you always notifies regardless.</span>
+        <input type="checkbox" id="TOAST_ON_DONE" />
+      </label>
+
+      <label class="row">
+        <span class="label">
+          Quiet hours
+          <input type="text" id="QUIET_HOURS" placeholder="23:00-08:00" class="text" />
+        </span>
+        <span class="hint">Silences everything, including alerts that normally always fire. Leave empty to disable.</span>
+      </label>
+    </section>
+
+    <section class="card">
+      <h2>Sounds</h2>
+      <label class="row">
+        <span class="label">
+          Sound pack
+          <select id="SOUND_PACK" class="select"></select>
+        </span>
+        <span class="hint">
+          A pack is a folder in <code id="packdir">~/.claude/claude-sounds/</code>.
+          Anything a pack is missing falls back to the default.
+        </span>
+      </label>
+    </section>
+
+    <section class="card danger">
+      <h2>Remove</h2>
+      <p class="muted">
+        Takes the hooks out of <code>settings.json</code> and leaves everything
+        else alone. Your settings file is kept, in case you reinstall.
+      </p>
+      <button id="uninstall">Remove the alerts</button>
+    </section>
+  </main>
+
+  <footer>
+    <span id="confpath" class="muted mono"></span>
+  </footer>
+
+  <script src="main.js"></script>
+</body>
+</html>

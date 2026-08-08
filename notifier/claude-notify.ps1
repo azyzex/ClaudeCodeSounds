@@ -19,6 +19,10 @@ $ErrorActionPreference = 'SilentlyContinue'
 $confFile = Join-Path $env:USERPROFILE '.claude\claude-notify.conf'
 $soundDir = Join-Path $env:USERPROFILE '.claude\claude-sounds'
 $debug    = ($env:CLAUDE_NOTIFY_DEBUG -eq '1')
+# CLAUDE_NOTIFY_FORCE=1 plays the alert regardless of every suppression rule
+# below. The desktop app uses it for its preview button: you are tuning these
+# settings, so the preview must not be silenced by them.
+$force    = ($env:CLAUDE_NOTIFY_FORCE -eq '1')
 
 # --- options ------------------------------------------------------------------
 # Parsed with a regex, never invoked, so nothing in the file can execute.
@@ -121,7 +125,7 @@ if ($Kind -eq 'mark') {
 }
 
 # --- muted? -------------------------------------------------------------------
-if ((Test-InList $Kind $opt['MUTE']) -or $evEnabled -eq '0') {
+if (-not $force -and ((Test-InList $Kind $opt['MUTE']) -or $evEnabled -eq '0')) {
     Write-Decision "kind=$Kind suppressed=muted"
     exit 0
 }
@@ -130,7 +134,7 @@ if ((Test-InList $Kind $opt['MUTE']) -or $evEnabled -eq '0') {
 # QUIET_HOURS=23:00-08:00, and windows that wrap past midnight are handled.
 # This lives in the config rather than in a resident process, so it works
 # whether or not anything else is running.
-if ($opt['QUIET_HOURS'] -match '^\s*(\d{1,2}):?(\d{2})\s*-\s*(\d{1,2}):?(\d{2})\s*$') {
+if (-not $force -and $opt['QUIET_HOURS'] -match '^\s*(\d{1,2}):?(\d{2})\s*-\s*(\d{1,2}):?(\d{2})\s*$') {
     $from = [int]$matches[1] * 60 + [int]$matches[2]
     $to   = [int]$matches[3] * 60 + [int]$matches[4]
     $now  = (Get-Date).Hour * 60 + (Get-Date).Minute
@@ -155,7 +159,7 @@ if (Test-Path $startFile) {
     } catch { $elapsed = $null }
     Remove-Item $startFile -Force -ErrorAction SilentlyContinue
 }
-if (-not $always -and $minSeconds -gt 0 -and $null -ne $elapsed -and $elapsed -lt $minSeconds) {
+if (-not $force -and -not $always -and $minSeconds -gt 0 -and $null -ne $elapsed -and $elapsed -lt $minSeconds) {
     Write-Decision "kind=$Kind suppressed=too-quick elapsed=$elapsed min=$minSeconds"
     exit 0
 }
@@ -192,7 +196,7 @@ function Test-Focused {
     } catch { return $false }
 }
 
-if (-not $always -and $opt['SUPPRESS_WHEN_FOCUSED'] -eq '1' -and (Test-Focused)) {
+if (-not $force -and -not $always -and $opt['SUPPRESS_WHEN_FOCUSED'] -eq '1' -and (Test-Focused)) {
     Write-Decision "kind=$Kind suppressed=focused"
     exit 0
 }
@@ -201,7 +205,7 @@ if (-not $always -and $opt['SUPPRESS_WHEN_FOCUSED'] -eq '1' -and (Test-Focused))
 # Several of these events can fire inside the same second. Without this you get
 # a stutter of overlapping audio.
 $stamp = Join-Path $env:TEMP 'claude-notify.last'
-if (Test-Path $stamp) {
+if (-not $force -and (Test-Path $stamp)) {
     if (((Get-Date) - (Get-Item $stamp).LastWriteTime).TotalSeconds -lt $debounce) {
         Write-Decision "kind=$Kind suppressed=debounced"
         exit 0

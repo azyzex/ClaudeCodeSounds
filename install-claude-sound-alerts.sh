@@ -500,8 +500,13 @@ if [ "$KIND" = "mark" ]; then
   exit 0
 fi
 
+# CLAUDE_NOTIFY_FORCE=1 plays the alert regardless of every suppression rule
+# below. The desktop app uses it for its preview button: you are tuning these
+# settings, so the preview must not be silenced by them.
+FORCE="${CLAUDE_NOTIFY_FORCE:-0}"
+
 # --- muted? -------------------------------------------------------------------
-if in_list "$KIND" "$MUTE" || [ "$EV_ENABLED" = "0" ]; then
+if [ "$FORCE" != "1" ] && { in_list "$KIND" "$MUTE" || [ "$EV_ENABLED" = "0" ]; }; then
   [ "${CLAUDE_NOTIFY_DEBUG:-0}" = "1" ] && printf 'kind=%s suppressed=muted\n' "$KIND"
   exit 0
 fi
@@ -510,7 +515,7 @@ fi
 # QUIET_HOURS=23:00-08:00, and windows that wrap past midnight are handled.
 # This lives in the config rather than in a resident process, so it works
 # whether or not anything else is running.
-if [ -n "$QUIET_HOURS" ]; then
+if [ "$FORCE" != "1" ] && [ -n "$QUIET_HOURS" ]; then
   qh_now=$(date +%H%M | sed 's/^0*//'); [ -n "$qh_now" ] || qh_now=0
   qh_from=$(printf '%s' "$QUIET_HOURS" | cut -d- -f1 | tr -d ': ' | sed 's/^0*//')
   qh_to=$(printf '%s'   "$QUIET_HOURS" | cut -s -d- -f2 | tr -d ': ' | sed 's/^0*//')
@@ -549,7 +554,7 @@ if [ -f "$STARTFILE" ]; then
   esac
   rm -f "$STARTFILE" 2>/dev/null || true
 fi
-if [ "$ALWAYS" = "0" ] && [ "$MIN_SECONDS" -gt 0 ] && [ -n "$ELAPSED" ] \
+if [ "$FORCE" != "1" ] && [ "$ALWAYS" = "0" ] && [ "$MIN_SECONDS" -gt 0 ] && [ -n "$ELAPSED" ] \
    && [ "$ELAPSED" -lt "$MIN_SECONDS" ]; then
   [ "${CLAUDE_NOTIFY_DEBUG:-0}" = "1" ] \
     && printf 'kind=%s suppressed=too-quick elapsed=%s min=%s\n' "$KIND" "$ELAPSED" "$MIN_SECONDS"
@@ -584,7 +589,7 @@ is_focused() {
   return 1
 }
 
-if [ "$ALWAYS" = "0" ] && [ "$SUPPRESS_WHEN_FOCUSED" = "1" ] && is_focused; then
+if [ "$FORCE" != "1" ] && [ "$ALWAYS" = "0" ] && [ "$SUPPRESS_WHEN_FOCUSED" = "1" ] && is_focused; then
   [ "${CLAUDE_NOTIFY_DEBUG:-0}" = "1" ] && printf 'kind=%s suppressed=focused\n' "$KIND"
   exit 0
 fi
@@ -594,7 +599,7 @@ fi
 # a stutter of overlapping audio. Namespaced by uid because /tmp is shared.
 STAMP="$TMP/claude-notify.$UID_.last"
 NOW=$(date +%s)
-if [ -f "$STAMP" ]; then
+if [ "$FORCE" != "1" ] && [ -f "$STAMP" ]; then
   LAST=$(cat "$STAMP" 2>/dev/null || echo 0)
   case "$LAST" in ''|*[!0-9]*) LAST=0 ;; esac
   if [ $((NOW - LAST)) -lt "$DEBOUNCE_SECONDS" ]; then
