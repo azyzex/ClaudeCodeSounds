@@ -177,12 +177,8 @@ jobs:
           git diff --exit-code -- app/src-tauri/icons \
             || { echo "icons differ from what make-icons.py produces; commit the regenerated files"; exit 1; }
 
-      # Reported, not enforced: there is no Rust toolchain on the machine this
-      # was written on, so the formatter cannot be run before pushing. Turn this
-      # into `cargo fmt --check` once that changes.
-      - name: Formatting (advisory)
+      - name: Formatting
         working-directory: app/src-tauri
-        continue-on-error: true
         run: cargo fmt --check
 
       - name: Clippy

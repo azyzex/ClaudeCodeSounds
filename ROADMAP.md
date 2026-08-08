@@ -39,7 +39,7 @@ Everything the app will need to configure.
 - [x] `CLAUDE_NOTIFY_DRYRUN=1`, which the app also needs for previewing
 - [x] **Bundled sounds** — nine synthesised sounds, embedded as base64
 - [x] **Sound packs** — a pack is a folder, so people can make their own
-- [ ] Docs and a v1.2.0 release
+- [x] Docs and a v1.2.0 release
 
 **Bundled sounds is a decision, not a question.** It ships, and it ships before
 the app. It removes the `sound=none` failure mode on minimal Linux installs, it
@@ -57,11 +57,19 @@ no system sounds at all, CI asserts it, and the scripts are feature-complete.
 
 ## Phase 2 — app v0.1, the window
 
-- Per-event rows: toggle, sound dropdown, **play button**, volume, pattern
-- Suppression settings in plain language
-- Install and uninstall the hooks from the app, using the bundled scripts
-- Detect and adopt an existing script install rather than fighting it
-- Recent alert log: what fired, what was suppressed and why
+- [x] Scaffold: Tauri v2, generated icons, CI building and testing on Linux
+      and Windows
+- [x] Rust owns the config format, with tests that hold it to the same rules
+      the notifier scripts follow
+- [x] Per-event rows: toggle, sound dropdown, **play button**, volume, pattern
+- [x] Suppression settings in plain language
+- [x] Install and uninstall the hooks from the app, using the same merge,
+      backup and idempotency rules as the scripts
+- [x] Detect an existing script install rather than fighting it
+- [ ] Bundle the scripts and sounds as resources, and write them out on install
+- [ ] Recent alert log: what fired, what was suppressed and why
+- [ ] Run it, look at it, fix what looks wrong
+- [ ] Release workflow producing per-platform installers
 
 **Exit criteria:** a fresh machine with no terminal use gets working alerts, and
 uninstalling the app leaves them working.
