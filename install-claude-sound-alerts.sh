@@ -460,18 +460,29 @@ LOGFILE="$HOME/.claude/claude-notify.log"
 # debug output can never disagree. It never fails the alert: a log that cannot
 # be written is not worth losing a notification over.
 record() {
-  if [ "${CLAUDE_NOTIFY_DRYRUN:-0}" != "1" ]; then
+  # Only when the directory is already there. The notifier can be pointed at a
+  # HOME that was never installed into, and creating directories under it would
+  # be a surprising thing for a notification to do.
+  if [ "${CLAUDE_NOTIFY_DRYRUN:-0}" != "1" ] && [ -d "${LOGFILE%/*}" ]; then
     # Trim before appending so the file cannot grow without bound. 64KB is a few
     # thousand alerts, far more than anything ever displays.
-    size=$(wc -c < "$LOGFILE" 2>/dev/null | tr -d ' ')
-    case "$size" in
-      ''|*[!0-9]*) ;;
-      *) if [ "$size" -gt 65536 ]; then
-           tail -n 200 "$LOGFILE" > "$LOGFILE.tmp" 2>/dev/null \
-             && mv "$LOGFILE.tmp" "$LOGFILE" 2>/dev/null
-         fi ;;
-    esac
-    printf '%s|%s\n' "$(date +%s)" "$1" >> "$LOGFILE" 2>/dev/null || true
+    # Guarded on the file existing: an input redirection that cannot open its
+    # target is reported by the shell itself, which 2>/dev/null on the command
+    # does not suppress.
+    if [ -f "$LOGFILE" ]; then
+      size=$(wc -c < "$LOGFILE" 2>/dev/null | tr -d ' ')
+      case "$size" in
+        ''|*[!0-9]*) ;;
+        *) if [ "$size" -gt 65536 ]; then
+             { tail -n 200 "$LOGFILE" > "$LOGFILE.tmp"; } 2>/dev/null \
+               && mv "$LOGFILE.tmp" "$LOGFILE" 2>/dev/null
+           fi ;;
+      esac
+    fi
+    # Braces, so the shell's own redirection failure is suppressed too. A
+    # redirect that cannot open its target is reported by the shell rather than
+    # by the command, and this must never write to stderr.
+    { printf '%s|%s\n' "$(date +%s)" "$1" >> "$LOGFILE"; } 2>/dev/null || true
   fi
   if [ "${CLAUDE_NOTIFY_DEBUG:-0}" = "1" ]; then printf '%s\n' "$1"; fi
   return 0
