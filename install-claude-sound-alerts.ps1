@@ -480,8 +480,24 @@ function Test-InList {
     return (($List -split ',' | ForEach-Object { $_.Trim() }) -contains $Needle)
 }
 
+# Record what was decided. Every exit path goes through this, so the log and the
+# debug output can never disagree. It never fails the alert: a log that cannot be
+# written is not worth losing a notification over.
 function Write-Decision {
     param([string]$Text)
+    if ($env:CLAUDE_NOTIFY_DRYRUN -ne '1') {
+        try {
+            $log = Join-Path $env:USERPROFILE '.claude\claude-notify.log'
+            # Trim before appending so the file cannot grow without bound. 64KB
+            # is a few thousand alerts, far more than anything ever displays.
+            if ((Test-Path $log) -and (Get-Item $log).Length -gt 65536) {
+                $keep = Get-Content $log -Tail 200
+                [System.IO.File]::WriteAllLines($log, $keep)
+            }
+            $stamp = [int][double]::Parse((Get-Date -UFormat %s))
+            Add-Content -Path $log -Value ("{0}|{1}" -f $stamp, $Text) -Encoding utf8
+        } catch { }
+    }
     if ($debug) { Write-Output $Text }
 }
 

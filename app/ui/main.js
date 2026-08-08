@@ -77,6 +77,7 @@ async function preview(kind, button) {
     status(String(e), 'err');
   } finally {
     button.disabled = false;
+    renderLog();
   }
 }
 
@@ -268,6 +269,62 @@ async function setHooks(install) {
   }
 }
 
+function whenText(epochSeconds) {
+  const secs = Math.max(0, Math.floor(Date.now() / 1000) - epochSeconds);
+  if (secs < 60) return 'just now';
+  if (secs < 3600) return Math.floor(secs / 60) + 'm ago';
+  if (secs < 86400) return Math.floor(secs / 3600) + 'h ago';
+  return new Date(epochSeconds * 1000).toLocaleDateString();
+}
+
+const OUTCOME_TEXT = {
+  played: 'played',
+  muted: 'muted',
+  focused: 'skipped, terminal was focused',
+  debounced: 'skipped, too soon after the last one',
+  'too-quick': 'skipped, the turn was too short',
+  'quiet-hours': 'skipped, quiet hours',
+};
+
+async function renderLog() {
+  const host = $('log');
+  let entries = [];
+  try {
+    entries = await invoke('recent_log', { limit: 12 });
+  } catch {
+    return;                       // the log is a nicety, never a failure
+  }
+  host.textContent = '';
+  if (entries.length === 0) {
+    const p = document.createElement('p');
+    p.className = 'muted';
+    p.textContent = 'Nothing yet. Alerts appear here once Claude Code fires one.';
+    host.append(p);
+    return;
+  }
+  const names = Object.fromEntries(EVENTS.map((e) => [e.kind, e.name]));
+  for (const e of entries) {
+    const row = document.createElement('div');
+    row.className = 'log-row' + (e.outcome === 'played' ? ' played' : '');
+
+    const when = document.createElement('span');
+    when.className = 'log-when';
+    when.textContent = whenText(e.at);
+
+    const kind = document.createElement('span');
+    kind.className = 'log-kind';
+    kind.textContent = names[e.kind] || e.kind;
+
+    const outcome = document.createElement('span');
+    outcome.className = 'log-outcome';
+    const base = OUTCOME_TEXT[e.outcome] || e.outcome;
+    outcome.textContent = e.outcome === 'played' && e.sound ? base + ' ' + e.sound : base;
+
+    row.append(when, kind, outcome);
+    host.append(row);
+  }
+}
+
 async function load() {
   state = await invoke('load_state');
   $('confpath').textContent = state.conf_path;
@@ -275,6 +332,7 @@ async function load() {
   renderEvents();
   bindGeneral();
   fillGeneral();
+  await renderLog();
 }
 
 async function main() {

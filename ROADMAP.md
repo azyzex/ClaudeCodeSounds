@@ -67,9 +67,9 @@ no system sounds at all, CI asserts it, and the scripts are feature-complete.
       backup and idempotency rules as the scripts
 - [x] Detect an existing script install rather than fighting it
 - [x] Bundle the scripts and sounds as resources, and write them out on install
-- [ ] Recent alert log: what fired, what was suppressed and why
+- [x] Recent alert log: what fired, what was suppressed and why
 - [x] Run it, look at it, fix what looks wrong
-- [ ] Release workflow producing per-platform installers
+- [x] Release workflow producing per-platform installers
 
 **Exit criteria:** a fresh machine with no terminal use gets working alerts, and
 uninstalling the app leaves them working.

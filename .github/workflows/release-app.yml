@@ -1,0 +1,141 @@
+name: Release app
+
+# Builds the desktop app for each platform and attaches the installers to a
+# release. Triggered by an app-v* tag, so the scripts and the app can be
+# released independently: the scripts use plain v* tags.
+on:
+  push:
+    tags: ['app-v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing tag to build and attach to, e.g. app-v0.1.0'
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: ${{ matrix.label }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # macOS is built twice rather than as a universal binary: two smaller
+          # downloads, and the Apple Silicon runner does not have to emulate.
+          - os: macos-14
+            label: macOS (Apple Silicon)
+            target: aarch64-apple-darwin
+          - os: macos-13
+            label: macOS (Intel)
+            target: x86_64-apple-darwin
+          - os: ubuntu-22.04
+            label: Linux
+            target: x86_64-unknown-linux-gnu
+          - os: windows-latest
+            label: Windows
+            target: x86_64-pc-windows-msvc
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+
+      - name: Rust target
+        run: rustup target add ${{ matrix.target }}
+
+      # Built on the oldest supported Ubuntu on purpose: glibc is backwards
+      # compatible but not forwards, so a binary built on a newer release will
+      # not run on an older one.
+      - name: Linux build dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq \
+            libwebkit2gtk-4.0-dev libwebkit2gtk-4.1-dev \
+            libappindicator3-dev librsvg2-dev patchelf libfuse2
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install the Tauri CLI
+        working-directory: app
+        run: npm install --no-audit --no-fund
+
+      - name: Build
+        working-directory: app
+        run: npx tauri build --target ${{ matrix.target }}
+
+      # Names are made explicit here rather than left as Tauri's defaults,
+      # because every platform's installers land in one release and
+      # "app_0.1.0_x64.msi" does not say which OS it is for.
+      - name: Collect the installers
+        shell: bash
+        run: |
+          mkdir -p dist
+          root="app/src-tauri/target/${{ matrix.target }}/release/bundle"
+          version="$(node -p "require('./app/package.json').version")"
+          case "${{ runner.os }}" in
+            Windows) suffix="windows-x64.msi";     find "$root" -name '*.msi'      -exec cp {} "dist/ClaudeCodeSounds-$version-$suffix" \; ;;
+            Linux)   suffix="linux-x86_64.AppImage"; find "$root" -name '*.AppImage' -exec cp {} "dist/ClaudeCodeSounds-$version-$suffix" \;
+                     find "$root" -name '*.deb' -exec cp {} "dist/ClaudeCodeSounds-$version-linux-amd64.deb" \; ;;
+            macOS)   arch="${{ matrix.target }}"
+                     case "$arch" in aarch64*) suffix="macos-apple-silicon.dmg" ;; *) suffix="macos-intel.dmg" ;; esac
+                     find "$root" -name '*.dmg' -exec cp {} "dist/ClaudeCodeSounds-$version-$suffix" \; ;;
+          esac
+          ls -la dist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: installers-${{ matrix.target }}
+          path: dist/*
+          if-no-files-found: error
+
+  publish:
+    name: Attach to the release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: all
+          merge-multiple: true
+
+      - run: ls -la all
+
+      # Unsigned, deliberately: nothing in this project costs money, and a
+      # certificate does. The notes say so rather than leaving people to guess
+      # at the warnings.
+      - name: Publish
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event.inputs.tag || github.ref_name }}
+          files: all/*
+          fail_on_unmatched_files: true
+          body: |
+            Desktop configurator for Claude Code sound alerts.
+
+            The alerts themselves are hooks that run with or without this app.
+            If you would rather not install anything, the shell and PowerShell
+            installers in the repository do the same job.
+
+            **Downloads are per platform.** Pick the one for your machine:
+
+            | Platform | File |
+            | --- | --- |
+            | Windows | `*-windows-x64.msi` |
+            | macOS, Apple Silicon | `*-macos-apple-silicon.dmg` |
+            | macOS, Intel | `*-macos-intel.dmg` |
+            | Linux | `*-linux-x86_64.AppImage` or `*-linux-amd64.deb` |
+
+            These builds are **unsigned**, because signing certificates cost
+            money and this project does not spend any. That means:
+
+            * **macOS** will say the app is from an unidentified developer.
+              Right-click the app and choose Open the first time, then confirm.
+            * **Windows** SmartScreen will warn until enough people have
+              installed it. Choose More info, then Run anyway.
+            * **Linux** is unaffected. The AppImage needs `chmod +x` before it
+              will run.

@@ -154,3 +154,20 @@ button.play { padding: 5px 11px; }
 button:disabled { opacity: 0.5; cursor: default; border-color: var(--line); }
 
 footer { max-width: 720px; margin: 18px auto 0; }
+
+/* Activity log ------------------------------------------------------------ */
+
+.log-row {
+  display: grid;
+  grid-template-columns: auto auto 1fr;
+  gap: 12px;
+  align-items: baseline;
+  padding: 6px 0;
+  border-top: 1px solid var(--line);
+  font-size: 13px;
+}
+.log-row:first-child { border-top: 0; }
+.log-when { color: var(--muted); font-variant-numeric: tabular-nums; }
+.log-kind { font-weight: 600; }
+.log-outcome { color: var(--muted); }
+.log-row.played .log-outcome { color: var(--ok); }

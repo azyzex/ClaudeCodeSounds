@@ -19,6 +19,9 @@ It installs into `~/.claude/settings.json`, so it applies to every project and e
 
 ## Install
 
+There are two ways in, and they produce the same thing on disk. The scripts
+below need no app; the [desktop app](#desktop-app) needs no terminal.
+
 ### Windows (PowerShell)
 
 Read the script first, then run it:
@@ -199,6 +202,26 @@ On Linux you also need a player that handles `.oga` files. `paplay`, `pw-play`, 
 - Claude Code with hooks support
 - Windows: PowerShell 5.1 or later, which ships with Windows 10 and 11
 - Linux and macOS: `bash`, plus `python3` for the installer only. The alerts themselves need no Python. A desktop notification needs `notify-send` on Linux or `osascript` on macOS, but sound works without either.
+
+## Desktop app
+
+A small configurator for everything below: toggle each alert, pick a sound and
+hear it, set volumes and rhythms, and see recent activity including the alerts
+it deliberately stayed quiet for. It can install and remove the hooks itself, so
+a machine that has never run the scripts needs no terminal.
+
+Downloads are per platform, on the [releases page](https://github.com/azyzex/ClaudeCodeSounds/releases):
+`.msi` for Windows, `.dmg` for macOS (separate Apple Silicon and Intel builds),
+and `.AppImage` or `.deb` for Linux.
+
+The builds are unsigned, because signing certificates cost money and this
+project does not spend any. macOS will call it an unidentified developer, so
+right-click and choose Open the first time; Windows SmartScreen will warn until
+enough people have installed it. Linux is unaffected.
+
+**The app is optional and never required.** The hooks own the alerting; the app
+only edits the same config file you could edit by hand. Removing the app leaves
+your alerts working.
 
 ## Development
 

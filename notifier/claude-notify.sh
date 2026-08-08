@@ -83,6 +83,30 @@ in_list() {  # in_list <needle> <comma,list>
   return 1
 }
 
+LOGFILE="$HOME/.claude/claude-notify.log"
+
+# Record what was decided. Every exit path goes through this, so the log and the
+# debug output can never disagree. It never fails the alert: a log that cannot
+# be written is not worth losing a notification over.
+record() {
+  if [ "${CLAUDE_NOTIFY_DRYRUN:-0}" != "1" ]; then
+    # Trim before appending so the file cannot grow without bound. 64KB is a few
+    # thousand alerts, far more than anything ever displays.
+    size=$(wc -c < "$LOGFILE" 2>/dev/null | tr -d ' ')
+    case "$size" in
+      ''|*[!0-9]*) ;;
+      *) if [ "$size" -gt 65536 ]; then
+           tail -n 200 "$LOGFILE" > "$LOGFILE.tmp" 2>/dev/null \
+             && mv "$LOGFILE.tmp" "$LOGFILE" 2>/dev/null
+         fi ;;
+    esac
+    printf '%s|%s\n' "$(date +%s)" "$1" >> "$LOGFILE" 2>/dev/null || true
+  fi
+  if [ "${CLAUDE_NOTIFY_DEBUG:-0}" = "1" ]; then printf '%s\n' "$1"; fi
+  return 0
+}
+
+
 # --- read the hook payload ----------------------------------------------------
 # Claude Code sends the event JSON on stdin. Every event carries session_id and
 # cwd; Notification carries message.
@@ -125,7 +149,7 @@ STARTFILE="$TMP/claude-notify-start.$UID_.$(printf '%s' "$SESSION" | tr -c 'a-zA
 # This is the whole job of the UserPromptSubmit hook. No sound, no notification.
 if [ "$KIND" = "mark" ]; then
   date +%s > "$STARTFILE" 2>/dev/null || true
-  [ "${CLAUDE_NOTIFY_DEBUG:-0}" = "1" ] && printf 'kind=mark session=%s\n' "$SESSION"
+  record "kind=mark session=$SESSION"
   exit 0
 fi
 
@@ -136,7 +160,7 @@ FORCE="${CLAUDE_NOTIFY_FORCE:-0}"
 
 # --- muted? -------------------------------------------------------------------
 if [ "$FORCE" != "1" ] && { in_list "$KIND" "$MUTE" || [ "$EV_ENABLED" = "0" ]; }; then
-  [ "${CLAUDE_NOTIFY_DEBUG:-0}" = "1" ] && printf 'kind=%s suppressed=muted\n' "$KIND"
+  record "kind=$KIND suppressed=muted"
   exit 0
 fi
 
@@ -161,8 +185,7 @@ if [ "$FORCE" != "1" ] && [ -n "$QUIET_HOURS" ]; then
         { [ "$qh_now" -ge "$qh_from" ] || [ "$qh_now" -lt "$qh_to" ]; } && qh_quiet=1
       fi
       if [ "$qh_quiet" = "1" ]; then
-        [ "${CLAUDE_NOTIFY_DEBUG:-0}" = "1" ] \
-          && printf 'kind=%s suppressed=quiet-hours window=%s\n' "$KIND" "$QUIET_HOURS"
+        record "kind=$KIND suppressed=quiet-hours window=$QUIET_HOURS"
         exit 0
       fi
       ;;
@@ -185,8 +208,7 @@ if [ -f "$STARTFILE" ]; then
 fi
 if [ "$FORCE" != "1" ] && [ "$ALWAYS" = "0" ] && [ "$MIN_SECONDS" -gt 0 ] && [ -n "$ELAPSED" ] \
    && [ "$ELAPSED" -lt "$MIN_SECONDS" ]; then
-  [ "${CLAUDE_NOTIFY_DEBUG:-0}" = "1" ] \
-    && printf 'kind=%s suppressed=too-quick elapsed=%s min=%s\n' "$KIND" "$ELAPSED" "$MIN_SECONDS"
+  record "kind=$KIND suppressed=too-quick elapsed=$ELAPSED min=$MIN_SECONDS"
   exit 0
 fi
 
@@ -219,7 +241,7 @@ is_focused() {
 }
 
 if [ "$FORCE" != "1" ] && [ "$ALWAYS" = "0" ] && [ "$SUPPRESS_WHEN_FOCUSED" = "1" ] && is_focused; then
-  [ "${CLAUDE_NOTIFY_DEBUG:-0}" = "1" ] && printf 'kind=%s suppressed=focused\n' "$KIND"
+  record "kind=$KIND suppressed=focused"
   exit 0
 fi
 
@@ -232,7 +254,7 @@ if [ "$FORCE" != "1" ] && [ -f "$STAMP" ]; then
   LAST=$(cat "$STAMP" 2>/dev/null || echo 0)
   case "$LAST" in ''|*[!0-9]*) LAST=0 ;; esac
   if [ $((NOW - LAST)) -lt "$DEBOUNCE_SECONDS" ]; then
-    [ "${CLAUDE_NOTIFY_DEBUG:-0}" = "1" ] && printf 'kind=%s suppressed=debounced\n' "$KIND"
+    record "kind=$KIND suppressed=debounced"
     exit 0
   fi
 fi
@@ -471,10 +493,8 @@ fi
 # CLAUDE_NOTIFY_DEBUG=1 prints the decision instead of staying silent. Useful
 # for working out why nothing is audible, and it is what CI asserts on, since a
 # zero exit alone cannot distinguish a played sound from a fallback bell.
-if [ "${CLAUDE_NOTIFY_DEBUG:-0}" = "1" ]; then
-  printf 'kind=%s sound=%s player=%s volume=%s pattern=%sx%s notified=%s elapsed=%s detail=%s\n' \
-    "$KIND" "${SOUND:-none}" "${PLAYER_USED:-bell}" "$EV_VOLUME" \
-    "$REPEAT_COUNT" "$REPEAT_GAP" "$NOTIFIED" "${ELAPSED:-na}" "$DETAIL"
-fi
+record "$(printf 'kind=%s sound=%s player=%s volume=%s pattern=%sx%s notified=%s elapsed=%s detail=%s' \
+  "$KIND" "${SOUND:-none}" "${PLAYER_USED:-bell}" "$EV_VOLUME" \
+  "$REPEAT_COUNT" "$REPEAT_GAP" "$NOTIFIED" "${ELAPSED:-na}" "$DETAIL")"
 
 exit 0

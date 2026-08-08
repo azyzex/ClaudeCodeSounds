@@ -207,6 +207,78 @@ fn write_payload(app: &tauri::AppHandle, dir: &Path) -> Result<(), String> {
     Ok(())
 }
 
+/// One line from the notifier's log.
+#[derive(Serialize)]
+struct LogEntry {
+    /// Seconds since the epoch, formatted by the UI in local time.
+    at: u64,
+    kind: String,
+    /// "played", or why it stayed quiet.
+    outcome: String,
+    sound: String,
+}
+
+/// The most recent alerts, newest first.
+///
+/// The notifier records every decision it makes, including the ones where it
+/// deliberately stayed quiet. Showing those is the point: "why did it not make
+/// a sound" is the question this answers.
+#[tauri::command]
+fn recent_log(limit: usize) -> Vec<LogEntry> {
+    let Some(dir) = config::claude_dir() else {
+        return Vec::new();
+    };
+    let Ok(text) = std::fs::read_to_string(dir.join("claude-notify.log")) else {
+        return Vec::new();
+    };
+    parse_log(&text, limit)
+}
+
+/// Split out from the command so it can be tested without a home directory.
+fn parse_log(text: &str, limit: usize) -> Vec<LogEntry> {
+    let mut out: Vec<LogEntry> = Vec::new();
+    for line in text.lines().rev() {
+        if out.len() >= limit.min(200) {
+            break;
+        }
+        let Some((stamp, rest)) = line.split_once('|') else {
+            continue;
+        };
+        let Ok(at) = stamp.trim().parse::<u64>() else {
+            continue;
+        };
+
+        let field = |name: &str| -> String {
+            rest.split_whitespace()
+                .find_map(|part| part.strip_prefix(name).map(|v| v.to_string()))
+                .unwrap_or_default()
+        };
+
+        let kind = field("kind=");
+        if kind.is_empty() || kind == "mark" {
+            continue; // mark records a start time and never alerts
+        }
+        let suppressed = field("suppressed=");
+        let sound = field("sound=");
+        out.push(LogEntry {
+            at,
+            kind,
+            outcome: if suppressed.is_empty() {
+                "played".to_string()
+            } else {
+                suppressed
+            },
+            sound: sound
+                .rsplit(['/', '\\'])
+                .next()
+                .unwrap_or("")
+                .trim_end_matches(".wav")
+                .to_string(),
+        });
+    }
+    out
+}
+
 #[tauri::command]
 fn set_hooks(app: tauri::AppHandle, install: bool) -> Result<usize, String> {
     let dir = config::claude_dir().ok_or("could not work out your home directory")?;
@@ -264,8 +336,73 @@ fn main() {
             load_state,
             save_settings,
             preview,
+            recent_log,
             set_hooks
         ])
         .run(tauri::generate_context!())
         .expect("error while running the app");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const SAMPLE: &str = concat!(
+        "1700000001|kind=mark session=abc\n",
+        "1700000002|kind=done sound=/home/u/.claude/claude-sounds/default/chime-glass.wav player=paplay volume=70 pattern=1x220 notified=no elapsed=91 detail=Turn finished\n",
+        "1700000003|kind=blocked suppressed=focused\n",
+        "1700000004|kind=limit sound=C:\\Users\\u\\.claude\\claude-sounds\\default\\alert-limit.wav player=SoundPlayer volume=100 pattern=3x140 notified=balloon elapsed=na detail=Rate limited\n",
+    );
+
+    #[test]
+    fn newest_entries_come_first() {
+        let log = parse_log(SAMPLE, 10);
+        assert_eq!(log[0].kind, "limit");
+        assert_eq!(log[1].kind, "blocked");
+        assert_eq!(log[2].kind, "done");
+    }
+
+    #[test]
+    fn mark_is_not_an_alert() {
+        // UserPromptSubmit only records a start time, so it must not appear as
+        // something that did or did not make a sound.
+        let log = parse_log(SAMPLE, 10);
+        assert_eq!(log.len(), 3);
+        assert!(log.iter().all(|e| e.kind != "mark"));
+    }
+
+    #[test]
+    fn suppression_reason_becomes_the_outcome() {
+        let log = parse_log(SAMPLE, 10);
+        assert_eq!(log[1].outcome, "focused");
+        assert_eq!(log[0].outcome, "played");
+    }
+
+    #[test]
+    fn sound_is_reduced_to_a_name_on_both_platforms() {
+        let log = parse_log(SAMPLE, 10);
+        assert_eq!(log[0].sound, "alert-limit"); // windows separators
+        assert_eq!(log[2].sound, "chime-glass"); // unix separators
+    }
+
+    #[test]
+    fn limit_is_respected_and_capped() {
+        assert_eq!(parse_log(SAMPLE, 2).len(), 2);
+        assert_eq!(parse_log(SAMPLE, 0).len(), 0);
+        assert_eq!(parse_log(SAMPLE, usize::MAX).len(), 3);
+    }
+
+    #[test]
+    fn malformed_lines_are_skipped_rather_than_fatal() {
+        let text = "not a log line\n|\nxyz|kind=done\n1700000009|kind=done sound=a/b.wav\n";
+        let log = parse_log(text, 10);
+        assert_eq!(log.len(), 1);
+        assert_eq!(log[0].at, 1700000009);
+        assert_eq!(log[0].sound, "b");
+    }
+
+    #[test]
+    fn an_empty_log_is_not_an_error() {
+        assert!(parse_log("", 10).is_empty());
+    }
 }
