@@ -77,6 +77,7 @@ DEBOUNCE_SECONDS=2
 ALWAYS_ALERT="blocked,limit,error"
 MUTE=""
 QUIET_HOURS=""
+SOUND_PACK="default"
 DONE_VOLUME=70
 BLOCKED_VOLUME=100
 LIMIT_VOLUME=100
@@ -93,7 +94,7 @@ conf_get() {
 load_conf() {
   [ -f "$CONF_FILE" ] || return 0
   for key in MIN_SECONDS SUPPRESS_WHEN_FOCUSED PROJECT_PITCH SPEAK \
-             TOAST_ON_DONE DEBOUNCE_SECONDS ALWAYS_ALERT MUTE QUIET_HOURS \
+             TOAST_ON_DONE DEBOUNCE_SECONDS ALWAYS_ALERT MUTE QUIET_HOURS SOUND_PACK \
              DONE_VOLUME BLOCKED_VOLUME LIMIT_VOLUME ERROR_VOLUME; do
     v=$(conf_get "$key")
     # An explicit if, not `[ -n "$v" ] && eval ...`: MUTE is empty by default and
@@ -196,6 +197,11 @@ MUTE=$MUTE
 # Stay silent inside this window, for example 23:00-08:00. Windows that wrap
 # past midnight work. Leave empty to disable.
 QUIET_HOURS=$QUIET_HOURS
+
+# Which sound pack to use. A pack is a folder under ~/.claude/claude-sounds/,
+# so adding your own means dropping a folder of .wav files in beside "default"
+# and naming it here.
+SOUND_PACK=$SOUND_PACK
 
 # ---------------------------------------------------------------------------
 # Per-event settings. One group per alert kind.
@@ -375,22 +381,34 @@ ok "wrote $(basename "$NOTIFY_SCRIPT")"
 
 mkdir -p "$SOUND_DIR"
 sound_count=0
-while IFS='|' read -r sound_name sound_b64; do
-  [ -n "$sound_name" ] || continue
+pack_count=0
+seen_packs=""
+while IFS='|' read -r sound_rel sound_b64; do
+  [ -n "$sound_rel" ] || continue
   [ -n "$sound_b64" ] || continue
+  # Each entry is "pack/name.wav". Refuse anything that tries to climb out.
+  case "$sound_rel" in
+    */../*|../*|/*) continue ;;
+  esac
+  sound_pack_name=${sound_rel%%/*}
+  mkdir -p "$SOUND_DIR/$sound_pack_name"
+  case " $seen_packs " in
+    *" $sound_pack_name "*) ;;
+    *) seen_packs="$seen_packs $sound_pack_name"; pack_count=$((pack_count + 1)) ;;
+  esac
   if printf '%s' "$sound_b64" \
      | "$PY" -c 'import base64,sys; sys.stdout.buffer.write(base64.b64decode(sys.stdin.read()))' \
-     > "$SOUND_DIR/$sound_name" 2>/dev/null; then
+     > "$SOUND_DIR/$sound_rel" 2>/dev/null; then
     sound_count=$((sound_count + 1))
   else
-    rm -f "$SOUND_DIR/$sound_name"
+    rm -f "$SOUND_DIR/$sound_rel"
   fi
 done <<'SOUNDSEOF'
 @@SOUNDS@@
 SOUNDSEOF
 
 if [ "$sound_count" -gt 0 ]; then
-  ok "wrote $sound_count sounds to $(basename "$SOUND_DIR")/"
+  ok "wrote $sound_count sounds in $pack_count pack(s)"
 else
   step "could not write the bundled sounds, falling back to system sounds"
 fi

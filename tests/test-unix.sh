@@ -296,6 +296,11 @@ C="$H/.claude/claude-notify.conf"
 # run resolves everything and reports it without playing or notifying.
 export CLAUDE_NOTIFY_DRYRUN=1
 
+# The focus check would otherwise suppress every 'done' when these tests run
+# from a focused terminal, and not on CI, which has no foreground window. Off,
+# so the results do not depend on where the test happens to run.
+setconf SUPPRESS_WHEN_FOCUSED 0
+
 echo "  (each kind gets its own defaults)"
 check "$(field "$(decide "done")" pattern)"  "1x220" "done defaults to a single pulse"
 check "$(field "$(decide blocked)" pattern)" "2x220" "blocked defaults to two"
@@ -354,11 +359,11 @@ case "$got" in
 esac
 echo "  (bundled sounds)"
 setconf DONE_SOUND ""   # the previous case pointed this at a custom file
-n_sounds=$(ls "$H/.claude/claude-sounds"/*.wav 2>/dev/null | wc -l)
+n_sounds=$(find "$H/.claude/claude-sounds" -name '*.wav' 2>/dev/null | wc -l | tr -d ' ')
 [ "$n_sounds" -ge 9 ] && ok "the installer wrote $n_sounds sounds" || bad "expected 9 bundled sounds, found $n_sounds"
 "$PY" - "$H/.claude/claude-sounds" <<'PYEOF' && ok "every bundled sound is a valid WAV" || bad "a bundled sound is not valid"
 import glob, os, sys, wave
-for f in sorted(glob.glob(os.path.join(sys.argv[1], '*.wav'))):
+for f in sorted(glob.glob(os.path.join(sys.argv[1], '*', '*.wav'))):
     w = wave.open(f)
     assert w.getnchannels() == 1 and w.getsampwidth() == 2 and w.getnframes() > 1000, f
     w.close()
@@ -379,6 +384,39 @@ done
 sounds=$(for k in "done" blocked limit error; do basename "$(field "$(decide "$k")" sound)"; done \
          | sort -u | wc -l | tr -d ' ')
 check "$sounds" "4" "the four kinds resolve to four different sounds"
+
+echo "  (sound packs)"
+[ -d "$H/.claude/claude-sounds/default" ] && ok "the default pack is a folder" || bad "expected claude-sounds/default/"
+got=$(field "$(decide "done")" sound)
+case "$got" in
+  */claude-sounds/default/*) ok "sounds resolve from the default pack" ;;
+  *) bad "expected the default pack (got '$got')" ;;
+esac
+
+# A pack is just a folder, so one file is enough to override that one sound.
+mkdir -p "$H/.claude/claude-sounds/retro"
+cp "$H/.claude/claude-sounds/default/alert-limit.wav" "$H/.claude/claude-sounds/retro/chime-glass.wav"
+setconf SOUND_PACK retro
+got=$(field "$(decide "done")" sound)
+case "$got" in
+  */retro/chime-glass.wav) ok "the selected pack takes precedence" ;;
+  *) bad "pack not used (got '$got')" ;;
+esac
+# The pack has no alert-attention, so that one must fall back rather than vanish.
+got=$(field "$(decide blocked)" sound)
+case "$got" in
+  */default/alert-attention.wav) ok "a partial pack falls back to default per sound" ;;
+  *) bad "expected a default fallback (got '$got')" ;;
+esac
+
+# A pack name is a directory component, never a path.
+setconf SOUND_PACK "../../../etc"
+got=$(field "$(decide "done")" sound)
+case "$got" in
+  */claude-sounds/default/*) ok "a traversal in the pack name is refused" ;;
+  *) bad "traversal not refused (got '$got')" ;;
+esac
+setconf SOUND_PACK default
 
 unset CLAUDE_NOTIFY_DRYRUN
 rm -rf "$H"

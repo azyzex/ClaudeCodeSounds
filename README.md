@@ -113,6 +113,7 @@ Or edit the file directly. The notifier re-reads it on every alert, so changes t
 | `ALWAYS_ALERT` | `blocked,limit,error` | Kinds that ignore `MIN_SECONDS` and the focus check, because you want to know regardless. |
 | `MUTE` | empty | Kinds to silence completely. |
 | `QUIET_HOURS` | empty | Silence everything inside a window, for example `23:00-08:00`. Windows that wrap past midnight work. |
+| `SOUND_PACK` | `default` | Which pack to use. See below. |
 
 ### Per-event settings
 
@@ -141,13 +142,21 @@ How well the focus check works varies by platform, and it is deliberately conser
 
 Everything in the table above is a config change. Only the sound files themselves need editing `~/.claude/claude-notify.ps1` or `~/.claude/claude-notify.sh`, and re-running the installer overwrites those, so keep a copy of your changes. Your config file is safe either way.
 
-Nine sounds are installed to `~/.claude/claude-sounds/`, and they are what you hear by default on every platform. That is deliberate: relying on system sounds meant the alerts differed per machine, and on a minimal Linux install there were often none at all.
+Nine sounds are installed to `~/.claude/claude-sounds/default/`, and they are what you hear by default on every platform. That is deliberate: relying on system sounds meant the alerts differed per machine, and on a minimal Linux install there were often none at all.
 
 The quickest way to use your own is `<KIND>_SOUND` in the config, which takes a full path and needs no editing of any script.
 
 If the bundled sounds are missing, the notifier falls back to the system set: `C:\Windows\Media` on Windows, `~/Library/Sounds` and `/System/Library/Sounds` on macOS, and the freedesktop theme directories on Linux.
 
 The sounds are generated rather than sourced, by `build/make-sounds.py`, so they are reproducible and carry no licensing question. Six of the nine are interchangeable finish chimes, which is what gives `PROJECT_PITCH` its range.
+
+### Sound packs
+
+A pack is just a folder. To make your own, put `.wav` files in `~/.claude/claude-sounds/<name>/` using the same filenames as `default/`, then set `SOUND_PACK=<name>`.
+
+You do not need a complete set. Anything the pack is missing falls back to `default/`, so a pack containing one file changes exactly one sound.
+
+The filenames are `chime-glass`, `chime-soft`, `chime-bright`, `chime-low`, `chime-warm` and `chime-mid` for finished turns, then `alert-attention`, `alert-limit` and `alert-error`.
 
 ## Troubleshooting
 

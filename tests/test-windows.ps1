@@ -320,6 +320,11 @@ $c = Join-Path $h '.claude\claude-notify.conf'
 # reports it without playing or notifying.
 $env:CLAUDE_NOTIFY_DRYRUN = '1'
 
+# The focus check would otherwise suppress every 'done' when these tests run
+# from a focused terminal, and not on CI, which has no foreground window. Off,
+# so the results do not depend on where the test happens to run.
+Set-Conf 'SUPPRESS_WHEN_FOCUSED' '0'
+
 # Pull one "name=value" field out of a decision line.
 function Get-Field {
     param([string]$Line, [string]$Name)
@@ -378,7 +383,7 @@ if (Test-Path $custom) {
 Write-Host "  (bundled sounds)"
 Set-Conf 'DONE_SOUND' ''   # the previous case pointed this at a custom file
 $sd = Join-Path $h '.claude\claude-sounds'
-$wavs = @(Get-ChildItem $sd -Filter '*.wav' -ErrorAction SilentlyContinue)
+$wavs = @(Get-ChildItem $sd -Filter '*.wav' -Recurse -ErrorAction SilentlyContinue)
 Assert ($wavs.Count -ge 9) "the installer wrote $($wavs.Count) sounds"
 
 # Valid RIFF/WAVE headers, not just files of the right name.
@@ -400,6 +405,23 @@ foreach ($k in @('done','blocked','limit','error')) {
     Assert ($s -like '*claude-sounds*') "$k resolves to a bundled sound"
 }
 Check (($picked | Sort-Object -Unique).Count) 4 "the four kinds resolve to four different sounds"
+
+Write-Host "  (sound packs)"
+Assert (Test-Path (Join-Path $sd 'default')) "the default pack is a folder"
+Assert ((Get-Field (Get-Decision 'done') 'sound') -like '*\default\*') "sounds resolve from the default pack"
+
+# A pack is just a folder, so one file is enough to override that one sound.
+New-Item -ItemType Directory -Path (Join-Path $sd 'retro') -Force | Out-Null
+Copy-Item (Join-Path $sd 'default\alert-limit.wav') (Join-Path $sd 'retro\chime-glass.wav')
+Set-Conf 'SOUND_PACK' 'retro'
+Assert ((Get-Field (Get-Decision 'done') 'sound') -like '*\retro\chime-glass.wav') "the selected pack takes precedence"
+# The pack has no alert-attention, so that one must fall back rather than vanish.
+Assert ((Get-Field (Get-Decision 'blocked') 'sound') -like '*\default\alert-attention.wav') "a partial pack falls back to default per sound"
+
+# A pack name is a directory component, never a path.
+Set-Conf 'SOUND_PACK' '..\..\..\Windows'
+Assert ((Get-Field (Get-Decision 'done') 'sound') -like '*\default\*') "a traversal in the pack name is refused"
+Set-Conf 'SOUND_PACK' 'default'
 
 $env:CLAUDE_NOTIFY_DRYRUN = $null
 Remove-Item $h -Recurse -Force -ErrorAction SilentlyContinue

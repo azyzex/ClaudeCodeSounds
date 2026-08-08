@@ -43,6 +43,9 @@ DEBOUNCE_SECONDS=$(cfg DEBOUNCE_SECONDS 2)
 ALWAYS_ALERT=$(cfg ALWAYS_ALERT "blocked,limit,error")
 MUTE=$(cfg MUTE "")
 QUIET_HOURS=$(cfg QUIET_HOURS "")
+SOUND_PACK=$(cfg SOUND_PACK "default")
+# A pack name is a single directory component, never a path.
+case "$SOUND_PACK" in ""|*/*|.*) SOUND_PACK="default" ;; esac
 
 # Per-event options, keyed by the uppercased kind: DONE_VOLUME, BLOCKED_PATTERN
 # and so on. Flat keys rather than sections, so the parser above stays a single
@@ -313,8 +316,11 @@ find_sound() {
   # Bundled sounds first. They are the same on every machine, which is what
   # makes the alerts consistent and PROJECT_PITCH meaningful. The system themes
   # below stay as a fallback for anyone who deletes them.
-  for n in $BUNDLED_SOUNDS; do
-    [ -f "$SOUND_DIR/$n.wav" ] && { printf '%s' "$SOUND_DIR/$n.wav"; return 0; }
+  # Selected pack, then default, then the flat layout used before packs existed.
+  for d in "$SOUND_DIR/$SOUND_PACK" "$SOUND_DIR/default" "$SOUND_DIR"; do
+    for n in $BUNDLED_SOUNDS; do
+      [ -f "$d/$n.wav" ] && { printf '%s' "$d/$n.wav"; return 0; }
+    done
   done
 
   if [ "$(uname -s)" = "Darwin" ]; then

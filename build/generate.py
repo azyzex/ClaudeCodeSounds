@@ -47,20 +47,29 @@ def read(path):
 
 
 def sound_blob():
-    """The bundled sounds as 'name.wav|base64', one per line.
+    """Every sound pack as 'pack/name.wav|base64', one per line.
 
     Embedded rather than downloaded, so the installers stay a single file with
     no network dependency at install time. PCM tones are high entropy and gzip
     only takes about 4% off, so the size is managed in build/make-sounds.py by
     keeping the rate and the durations down instead.
+
+    A pack is a folder under sounds/. Adding one needs no change here.
     """
     lines = []
-    for path in sorted(glob.glob(os.path.join(SOUNDS, '*.wav'))):
+    for path in sorted(glob.glob(os.path.join(SOUNDS, '*', '*.wav'))):
+        pack = os.path.basename(os.path.dirname(path))
+        name = os.path.basename(path)
+        # Forward slash regardless of platform: this is a path inside the
+        # generated installer, not a path on the machine generating it.
+        rel = '%s/%s' % (pack, name)
+        if '|' in rel:
+            raise SystemExit('sound path contains a pipe, which is the field separator: %s' % rel)
         with open(path, 'rb') as f:
             data = base64.b64encode(f.read()).decode('ascii')
-        lines.append('%s|%s' % (os.path.basename(path), data))
+        lines.append('%s|%s' % (rel, data))
     if not lines:
-        raise SystemExit('no sounds found in sounds/. Run: python build/make-sounds.py')
+        raise SystemExit('no sounds found in sounds/*/. Run: python build/make-sounds.py')
     return '\n'.join(lines)
 
 

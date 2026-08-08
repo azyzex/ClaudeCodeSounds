@@ -8,9 +8,12 @@ single-file installer. Run this only when changing the sound design:
 
     python build/make-sounds.py
 
-Output goes to sounds/, which is committed. The installers embed those files as
-base64, so a machine with no system sound theme at all still gets real audio
-instead of a terminal bell.
+Output goes to sounds/default/, which is committed. The installers embed every
+pack under sounds/ as base64, so a machine with no system sound theme at all
+still gets real audio instead of a terminal bell.
+
+A pack is just a folder: add sounds/<name>/ with the same filenames and it is
+installed alongside the default and selectable with SOUND_PACK.
 
 Format is 16-bit mono PCM WAV at 11025 Hz, which every player in the fallback
 chain handles, including aplay, which cannot decode .oga.
@@ -30,7 +33,7 @@ import struct
 import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-OUT = os.path.join(ROOT, 'sounds')
+OUT = os.path.join(ROOT, 'sounds', 'default')
 RATE = 11025
 
 

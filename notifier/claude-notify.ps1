@@ -32,6 +32,7 @@ $opt = @{
     ALWAYS_ALERT          = 'blocked,limit,error'
     MUTE                  = ''
     QUIET_HOURS           = ''
+    SOUND_PACK            = 'default'
 
     # Per-event, keyed by the uppercased kind. Flat keys rather than sections,
     # so the parser stays one regex and a v1.1.0 config keeps working untouched.
@@ -281,9 +282,16 @@ if (-not $playerUsed) {
         # Bundled sounds first. They are the same on every machine, which is
         # what makes the alerts consistent and PROJECT_PITCH meaningful. The
         # Windows Media set stays as a fallback for anyone who deletes them.
-        foreach ($b in $bundled) {
-            $p = Join-Path $soundDir "$b.wav"
-            if (Test-Path $p) { $soundPath = $p; break }
+        # A pack name is a single directory component, never a path.
+        $pack = $opt['SOUND_PACK']
+        if (-not $pack -or $pack -match '[\\/:]' -or $pack.StartsWith('.')) { $pack = 'default' }
+        # Selected pack, then default, then the flat layout used before packs.
+        foreach ($d in @((Join-Path $soundDir $pack), (Join-Path $soundDir 'default'), $soundDir)) {
+            foreach ($b in $bundled) {
+                $p = Join-Path $d "$b.wav"
+                if (Test-Path $p) { $soundPath = $p; break }
+            }
+            if ($soundPath) { break }
         }
     }
     if (-not $soundPath) {

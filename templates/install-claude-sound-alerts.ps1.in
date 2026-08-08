@@ -134,6 +134,7 @@ $opt = [ordered]@{
     ALWAYS_ALERT          = 'blocked,limit,error'
     MUTE                  = ''
     QUIET_HOURS           = ''
+    SOUND_PACK            = 'default'
     DONE_VOLUME           = '70'
     BLOCKED_VOLUME        = '100'
     LIMIT_VOLUME          = '100'
@@ -242,6 +243,11 @@ MUTE=$($opt['MUTE'])
 # Stay silent inside this window, for example 23:00-08:00. Windows that wrap
 # past midnight work. Leave empty to disable.
 QUIET_HOURS=$($opt['QUIET_HOURS'])
+
+# Which sound pack to use. A pack is a folder under ~/.claude/claude-sounds/,
+# so adding your own means dropping a folder of .wav files in beside "default"
+# and naming it here.
+SOUND_PACK=$($opt['SOUND_PACK'])
 
 # ---------------------------------------------------------------------------
 # Per-event settings. One group per alert kind.
@@ -399,21 +405,30 @@ $soundBlob = @'
 
 New-Item -ItemType Directory -Path $soundDir -Force | Out-Null
 $soundCount = 0
+$packs = @{}
 foreach ($line in ($soundBlob -split "`n")) {
     $line = $line.Trim()
     if (-not $line) { continue }
     $parts = $line -split '\|', 2
     if ($parts.Count -ne 2) { continue }
+    # Each entry is "pack/name.wav". Refuse anything that tries to climb out.
+    $rel = $parts[0]
+    if ($rel -match '\.\.' -or $rel -match '^[\\/]' -or $rel -match ':') { continue }
+    $packName = ($rel -split '/')[0]
+    $packs[$packName] = $true
     try {
+        New-Item -ItemType Directory -Path (Join-Path $soundDir $packName) -Force | Out-Null
         [System.IO.File]::WriteAllBytes(
-            (Join-Path $soundDir $parts[0]),
+            # String.Replace, not -replace: the latter treats the replacement
+            # as regex syntax, where a lone backslash is an escape and vanishes.
+            (Join-Path $soundDir $rel.Replace('/', '\')),
             [Convert]::FromBase64String($parts[1]))
         $soundCount++
     } catch { }
 }
 
 if ($soundCount -gt 0) {
-    Write-Ok "wrote $soundCount sounds to claude-sounds\"
+    Write-Ok "wrote $soundCount sounds in $($packs.Count) pack(s)"
 } else {
     Write-Step "could not write the bundled sounds, falling back to system sounds"
 }
