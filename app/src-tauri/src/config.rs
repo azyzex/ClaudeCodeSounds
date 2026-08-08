@@ -69,7 +69,11 @@ fn split_line(line: &str) -> Option<(String, String)> {
     }
     let eq = trimmed.find('=')?;
     let key = trimmed[..eq].trim();
-    if key.is_empty() || !key.chars().all(|c| c.is_ascii_uppercase() || c == '_' || c.is_ascii_digit()) {
+    if key.is_empty()
+        || !key
+            .chars()
+            .all(|c| c.is_ascii_uppercase() || c == '_' || c.is_ascii_digit())
+    {
         return None;
     }
     // Strip a trailing carriage return, so a file edited on Windows and read on

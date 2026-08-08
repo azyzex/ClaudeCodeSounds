@@ -97,10 +97,7 @@ fn hook_group(kind: &str, matcher: Option<&str>, unix: bool) -> Value {
 
 /// Strip our entries from every event we own, dropping events left empty.
 fn strip_ours(settings: &mut Value) {
-    let Some(hooks) = settings
-        .get_mut("hooks")
-        .and_then(|h| h.as_object_mut())
-    else {
+    let Some(hooks) = settings.get_mut("hooks").and_then(|h| h.as_object_mut()) else {
         return;
     };
 
@@ -120,13 +117,19 @@ pub fn install(settings: &mut Value, unix: bool) {
     if !settings.is_object() {
         *settings = json!({});
     }
-    if settings.get("hooks").map(|h| !h.is_object()).unwrap_or(true) {
+    if settings
+        .get("hooks")
+        .map(|h| !h.is_object())
+        .unwrap_or(true)
+    {
         settings["hooks"] = json!({});
     }
 
     strip_ours(settings);
 
-    let hooks = settings["hooks"].as_object_mut().expect("hooks is an object");
+    let hooks = settings["hooks"]
+        .as_object_mut()
+        .expect("hooks is an object");
     for (event, kind, matcher) in wiring() {
         let entry = hooks.entry(event.to_string()).or_insert_with(|| json!([]));
         if !entry.is_array() {
