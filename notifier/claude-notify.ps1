@@ -30,6 +30,14 @@ $opt = @{
     DEBOUNCE_SECONDS      = '2'
     ALWAYS_ALERT          = 'blocked,limit,error'
     MUTE                  = ''
+    QUIET_HOURS           = ''
+
+    # Per-event, keyed by the uppercased kind. Flat keys rather than sections,
+    # so the parser stays one regex and a v1.1.0 config keeps working untouched.
+    DONE_ENABLED    = '1'; DONE_VOLUME    = '70';  DONE_PATTERN    = '1';     DONE_SOUND    = ''
+    BLOCKED_ENABLED = '1'; BLOCKED_VOLUME = '100'; BLOCKED_PATTERN = '2';     BLOCKED_SOUND = ''
+    LIMIT_ENABLED   = '1'; LIMIT_VOLUME   = '100'; LIMIT_PATTERN   = '3x140'; LIMIT_SOUND   = ''
+    ERROR_ENABLED   = '1'; ERROR_VOLUME   = '100'; ERROR_PATTERN   = '2';     ERROR_SOUND   = ''
 }
 if (Test-Path $confFile) {
     foreach ($line in (Get-Content $confFile)) {
@@ -38,6 +46,26 @@ if (Test-Path $confFile) {
         }
     }
 }
+
+# Resolve the per-event options for this kind.
+$ev        = $Kind.ToUpperInvariant()
+$evEnabled = $opt["${ev}_ENABLED"]
+$evSound   = $opt["${ev}_SOUND"]
+$evVolume  = 100
+if ($opt["${ev}_VOLUME"] -match '^\d+$') { $evVolume = [int]$opt["${ev}_VOLUME"] }
+if ($evVolume -gt 100) { $evVolume = 100 }
+
+# How many times to play, and how far apart. "2" means twice at the default
+# spacing; "3x120" means three times, 120ms apart. Rhythm carries further than
+# pitch when you are not paying attention.
+$repeatCount = 1
+$repeatGap   = 220
+if ($opt["${ev}_PATTERN"] -match '^(\d+)(?:x(\d+))?$') {
+    $repeatCount = [int]$matches[1]
+    if ($matches[2]) { $repeatGap = [int]$matches[2] }
+}
+if ($repeatCount -lt 1) { $repeatCount = 1 }
+if ($repeatCount -gt 6) { $repeatCount = 6 }
 
 function Get-IntOpt {
     param([string]$Name, [int]$Default)
@@ -91,9 +119,25 @@ if ($Kind -eq 'mark') {
 }
 
 # --- muted? -------------------------------------------------------------------
-if (Test-InList $Kind $opt['MUTE']) {
+if ((Test-InList $Kind $opt['MUTE']) -or $evEnabled -eq '0') {
     Write-Decision "kind=$Kind suppressed=muted"
     exit 0
+}
+
+# --- quiet hours? -------------------------------------------------------------
+# QUIET_HOURS=23:00-08:00, and windows that wrap past midnight are handled.
+# This lives in the config rather than in a resident process, so it works
+# whether or not anything else is running.
+if ($opt['QUIET_HOURS'] -match '^\s*(\d{1,2}):?(\d{2})\s*-\s*(\d{1,2}):?(\d{2})\s*$') {
+    $from = [int]$matches[1] * 60 + [int]$matches[2]
+    $to   = [int]$matches[3] * 60 + [int]$matches[4]
+    $now  = (Get-Date).Hour * 60 + (Get-Date).Minute
+    $quiet = if ($from -le $to) { $now -ge $from -and $now -lt $to }
+             else { $now -ge $from -or $now -lt $to }   # wraps midnight
+    if ($quiet) {
+        Write-Decision "kind=$Kind suppressed=quiet-hours window=$($opt['QUIET_HOURS'])"
+        exit 0
+    }
 }
 
 # Kinds you always want to hear about ignore the elapsed and focus checks.
@@ -209,8 +253,9 @@ if ($opt['PROJECT_PITCH'] -eq '1' -and $Kind -eq 'done' -and $cwd) {
 # --- play ---------------------------------------------------------------------
 $playerUsed = ''
 $soundPath  = ''
+$dryRun     = ($env:CLAUDE_NOTIFY_DRYRUN -eq '1')
 
-if ($opt['SPEAK'] -eq '1') {
+if ($opt['SPEAK'] -eq '1' -and -not $dryRun) {
     try {
         Add-Type -AssemblyName System.Speech
         $synth = New-Object System.Speech.Synthesis.SpeechSynthesizer
@@ -221,31 +266,79 @@ if ($opt['SPEAK'] -eq '1') {
 }
 
 if (-not $playerUsed) {
-    foreach ($w in $wavs) {
-        $p = Join-Path $env:SystemRoot "Media\$w"
-        if (Test-Path $p) {
-            try {
-                $player = New-Object System.Media.SoundPlayer $p
-                $player.PlaySync()
-                if ($Kind -ne 'done') { Start-Sleep -Milliseconds 220; $player.PlaySync() }
-                $soundPath  = $p
-                $playerUsed = 'SoundPlayer'
-            } catch { }
-            break
+    # An explicit per-event file wins over the candidate list, so a kind can be
+    # pointed at your own sound without editing this script.
+    if ($evSound -and (Test-Path $evSound)) {
+        $soundPath = $evSound
+    } else {
+        foreach ($w in $wavs) {
+            $p = Join-Path $env:SystemRoot "Media\$w"
+            if (Test-Path $p) { $soundPath = $p; break }
         }
     }
 }
 
+# SoundPlayer has no volume control at all, so anything other than full volume
+# has to go through MediaPlayer. MediaPlayer is asynchronous and needs the file
+# opened before its duration is known, hence the bounded waits: a notifier must
+# never hang a hook.
+function Invoke-PlayOnce {
+    param([string]$Path, [int]$VolumePercent)
+
+    if ($VolumePercent -ge 100) {
+        $sp = New-Object System.Media.SoundPlayer $Path
+        $sp.PlaySync()
+        return 'SoundPlayer'
+    }
+
+    Add-Type -AssemblyName PresentationCore
+    $mp = New-Object System.Windows.Media.MediaPlayer
+    try {
+        $mp.Open([uri]$Path)
+        $mp.Volume = [double]$VolumePercent / 100.0
+        $waited = 0
+        while (-not $mp.NaturalDuration.HasTimeSpan -and $waited -lt 2000) {
+            Start-Sleep -Milliseconds 25; $waited += 25
+        }
+        $mp.Play()
+        $ms = 400
+        if ($mp.NaturalDuration.HasTimeSpan) {
+            $ms = [int]$mp.NaturalDuration.TimeSpan.TotalMilliseconds
+        }
+        if ($ms -gt 10000) { $ms = 10000 }
+        Start-Sleep -Milliseconds $ms
+        return 'MediaPlayer'
+    } finally {
+        $mp.Close()
+    }
+}
+
+if ($dryRun) {
+    # Resolve everything and report it, but make no sound and raise no popup.
+    # Used by the tests, and by anything that wants to know what would happen
+    # without actually interrupting the user.
+    $playerUsed = 'dryrun'
+} elseif ($soundPath) {
+    for ($i = 0; $i -lt $repeatCount; $i++) {
+        if ($i -gt 0) { Start-Sleep -Milliseconds $repeatGap }
+        try { $playerUsed = Invoke-PlayOnce -Path $soundPath -VolumePercent $evVolume }
+        catch { $playerUsed = ''; break }
+    }
+}
+
 if (-not $playerUsed) {
-    [Console]::Beep($freq, 220)
-    if ($Kind -ne 'done') { Start-Sleep -Milliseconds 120; [Console]::Beep($freq, 220) }
+    $soundPath = ''
+    for ($i = 0; $i -lt $repeatCount; $i++) {
+        if ($i -gt 0) { Start-Sleep -Milliseconds $repeatGap }
+        [Console]::Beep($freq, 220)
+    }
     $playerUsed = 'beep'
 }
 
 # --- tray balloon -------------------------------------------------------------
 # A balloon tip, not a message box. It does not steal keyboard focus.
 $notified = 'no'
-if ($Kind -ne 'done' -or $opt['TOAST_ON_DONE'] -eq '1') {
+if (-not $dryRun -and ($Kind -ne 'done' -or $opt['TOAST_ON_DONE'] -eq '1')) {
     try {
         Add-Type -AssemblyName System.Windows.Forms
         Add-Type -AssemblyName System.Drawing
@@ -265,6 +358,8 @@ if ($Kind -ne 'done' -or $opt['TOAST_ON_DONE'] -eq '1') {
 # nothing is audible.
 $reportSound = if ($soundPath) { $soundPath } else { 'none' }
 $reportElapsed = if ($null -ne $elapsed) { $elapsed } else { 'na' }
-Write-Decision "kind=$Kind sound=$reportSound player=$playerUsed notified=$notified elapsed=$reportElapsed detail=$detail"
+Write-Decision ("kind=$Kind sound=$reportSound player=$playerUsed volume=$evVolume " +
+                "pattern=${repeatCount}x${repeatGap} notified=$notified " +
+                "elapsed=$reportElapsed detail=$detail")
 
 exit 0

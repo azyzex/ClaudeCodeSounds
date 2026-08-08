@@ -131,6 +131,11 @@ $opt = [ordered]@{
     DEBOUNCE_SECONDS      = '2'
     ALWAYS_ALERT          = 'blocked,limit,error'
     MUTE                  = ''
+    QUIET_HOURS           = ''
+    DONE_VOLUME           = '70'
+    BLOCKED_VOLUME        = '100'
+    LIMIT_VOLUME          = '100'
+    ERROR_VOLUME          = '100'
 }
 
 # Read a KEY=value out of the config file. Parsed, never invoked, so a stray
@@ -231,6 +236,42 @@ ALWAYS_ALERT=$($opt['ALWAYS_ALERT'])
 
 # Alert kinds to silence completely. Comma separated, same names as above.
 MUTE=$($opt['MUTE'])
+
+# Stay silent inside this window, for example 23:00-08:00. Windows that wrap
+# past midnight work. Leave empty to disable.
+QUIET_HOURS=$($opt['QUIET_HOURS'])
+
+# ---------------------------------------------------------------------------
+# Per-event settings. One group per alert kind.
+#
+#   _ENABLED  0 turns this kind off completely
+#   _VOLUME   0-100. Below 100 plays through MediaPlayer instead of SoundPlayer,
+#             because SoundPlayer has no volume control
+#   _PATTERN  how many times to play, optionally NxMS for the gap in
+#             milliseconds. "3x140" is three pulses 140ms apart. Rhythm carries
+#             further than pitch when you are not paying attention
+#   _SOUND    full path to your own .wav, overriding the built-in choice
+# ---------------------------------------------------------------------------
+
+DONE_ENABLED=1
+DONE_VOLUME=$($opt['DONE_VOLUME'])
+DONE_PATTERN=1
+DONE_SOUND=
+
+BLOCKED_ENABLED=1
+BLOCKED_VOLUME=$($opt['BLOCKED_VOLUME'])
+BLOCKED_PATTERN=2
+BLOCKED_SOUND=
+
+LIMIT_ENABLED=1
+LIMIT_VOLUME=$($opt['LIMIT_VOLUME'])
+LIMIT_PATTERN=3x140
+LIMIT_SOUND=
+
+ERROR_ENABLED=1
+ERROR_VOLUME=$($opt['ERROR_VOLUME'])
+ERROR_PATTERN=2
+ERROR_SOUND=
 "@
     [System.IO.File]::WriteAllText($confFile, $text, (New-Object System.Text.UTF8Encoding($false)))
 }

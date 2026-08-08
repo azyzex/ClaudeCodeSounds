@@ -74,6 +74,11 @@ TOAST_ON_DONE=0
 DEBOUNCE_SECONDS=2
 ALWAYS_ALERT="blocked,limit,error"
 MUTE=""
+QUIET_HOURS=""
+DONE_VOLUME=70
+BLOCKED_VOLUME=100
+LIMIT_VOLUME=100
+ERROR_VOLUME=100
 
 # Read a KEY=value out of the config file. Never sources it, so a stray
 # backtick in someone's config cannot execute anything.
@@ -86,7 +91,8 @@ conf_get() {
 load_conf() {
   [ -f "$CONF_FILE" ] || return 0
   for key in MIN_SECONDS SUPPRESS_WHEN_FOCUSED PROJECT_PITCH SPEAK \
-             TOAST_ON_DONE DEBOUNCE_SECONDS ALWAYS_ALERT MUTE; do
+             TOAST_ON_DONE DEBOUNCE_SECONDS ALWAYS_ALERT MUTE QUIET_HOURS \
+             DONE_VOLUME BLOCKED_VOLUME LIMIT_VOLUME ERROR_VOLUME; do
     v=$(conf_get "$key")
     # An explicit if, not `[ -n "$v" ] && eval ...`: MUTE is empty by default and
     # is last in the list, so the short-circuit would make the loop return
@@ -184,6 +190,41 @@ ALWAYS_ALERT=$ALWAYS_ALERT
 
 # Alert kinds to silence completely. Comma separated, same names as above.
 MUTE=$MUTE
+
+# Stay silent inside this window, for example 23:00-08:00. Windows that wrap
+# past midnight work. Leave empty to disable.
+QUIET_HOURS=$QUIET_HOURS
+
+# ---------------------------------------------------------------------------
+# Per-event settings. One group per alert kind.
+#
+#   _ENABLED  0 turns this kind off completely
+#   _VOLUME   0-100. Ignored by aplay and canberra-gtk-play, which cannot set it
+#   _PATTERN  how many times to play, optionally NxMS for the gap in
+#             milliseconds. "3x120" is three pulses 120ms apart. Rhythm carries
+#             further than pitch when you are not paying attention
+#   _SOUND    absolute path to your own file, overriding the built-in choice
+# ---------------------------------------------------------------------------
+
+DONE_ENABLED=1
+DONE_VOLUME=$DONE_VOLUME
+DONE_PATTERN=1
+DONE_SOUND=
+
+BLOCKED_ENABLED=1
+BLOCKED_VOLUME=$BLOCKED_VOLUME
+BLOCKED_PATTERN=2
+BLOCKED_SOUND=
+
+LIMIT_ENABLED=1
+LIMIT_VOLUME=$LIMIT_VOLUME
+LIMIT_PATTERN=3x140
+LIMIT_SOUND=
+
+ERROR_ENABLED=1
+ERROR_VOLUME=$ERROR_VOLUME
+ERROR_PATTERN=2
+ERROR_SOUND=
 EOF
 }
 

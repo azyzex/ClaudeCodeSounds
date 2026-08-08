@@ -111,6 +111,22 @@ Or edit the file directly. The notifier re-reads it on every alert, so changes t
 | `DEBOUNCE_SECONDS` | `2` | Ignore repeat alerts for this long, so overlapping events do not stutter. |
 | `ALWAYS_ALERT` | `blocked,limit,error` | Kinds that ignore `MIN_SECONDS` and the focus check, because you want to know regardless. |
 | `MUTE` | empty | Kinds to silence completely. |
+| `QUIET_HOURS` | empty | Silence everything inside a window, for example `23:00-08:00`. Windows that wrap past midnight work. |
+
+### Per-event settings
+
+Each of the four kinds — `DONE`, `BLOCKED`, `LIMIT`, `ERROR` — has its own group.
+
+| Option | What it does |
+| --- | --- |
+| `<KIND>_ENABLED` | `0` turns that one kind off. |
+| `<KIND>_VOLUME` | `0-100`. |
+| `<KIND>_PATTERN` | How many times to play, optionally `NxMS` for the gap. `3x140` is three pulses 140ms apart. |
+| `<KIND>_SOUND` | Full path to your own file, overriding the built-in choice. |
+
+Rhythm is worth more than it sounds. Pitch is hard to place when you are not paying attention, but three quick pulses reads as urgent from across the room. The defaults use it: one pulse for a finished turn, two when something needs you, three tighter ones for a rate limit.
+
+Volume has platform limits. On Windows anything below 100 plays through `MediaPlayer` rather than `SoundPlayer`, which has no volume control at all. On Linux `aplay` and `canberra-gtk-play` cannot set volume and play at the system level.
 
 The config file is parsed, never sourced, so nothing in it can execute.
 
@@ -148,7 +164,9 @@ kind=blocked sound=/usr/share/sounds/freedesktop/stereo/dialog-warning.oga playe
 
 `sound=none` means no sound file was found. `player=bell` on Unix, or `player=beep` on Windows, means a file was found but playback failed, so it fell back to a raw tone. That distinction tells you which of the two fixes below you need.
 
-A `suppressed=` field instead means it worked exactly as configured and chose to stay quiet: `too-quick` (under `MIN_SECONDS`), `focused`, `debounced`, or `muted`.
+A `suppressed=` field instead means it worked exactly as configured and chose to stay quiet: `too-quick` (under `MIN_SECONDS`), `focused`, `debounced`, `quiet-hours`, or `muted`.
+
+To see what it *would* do without actually hearing it, add `CLAUDE_NOTIFY_DRYRUN=1`. It resolves the sound, volume and pattern and reports them, but plays nothing and raises no notification.
 
 On a minimal Linux install, the sound theme is often missing:
 

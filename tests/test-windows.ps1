@@ -248,12 +248,17 @@ Assert ($r -like '*kind=mark*')  "mark reports itself and exits"
 Assert ($r -notlike '*player=*') "mark chooses no player"
 
 Write-Host "  (debounce is configurable)"
+# Dry run, so the elapsed time between the two calls is process startup rather
+# than two sound clips plus a five second balloon, which would otherwise creep
+# up on the debounce window and make this flaky.
+$env:CLAUDE_NOTIFY_DRYRUN = '1'
 Set-Conf 'DEBOUNCE_SECONDS' '9'
 Get-Decision 'blocked' | Out-Null
 # Deliberately not via Get-Decision, which clears the stamp first.
 $env:USERPROFILE = $h; $env:CLAUDE_NOTIFY_DEBUG = '1'
 $r = ('{}' | & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $n -Kind blocked 2>$null | Out-String).Trim()
 $env:CLAUDE_NOTIFY_DEBUG = $null
+$env:CLAUDE_NOTIFY_DRYRUN = $null
 Assert ($r -like '*suppressed=debounced*') "DEBOUNCE_SECONDS suppresses a repeat"
 Set-Conf 'DEBOUNCE_SECONDS' '2'
 
@@ -299,6 +304,78 @@ Assert (-not (Test-Path (Join-Path $h 'pwned'))) "config is parsed, never invoke
 Write-Host "  (config survives a reinstall)"
 Invoke-Installer -Home_ $h | Out-Null
 Assert ((Get-Content $c -Raw) -like '*pwned*') "existing config left untouched by reinstall"
+Remove-Item $h -Recurse -Force -ErrorAction SilentlyContinue
+Write-Host ""
+
+# --------------------------------------------------------------------------
+Write-Host "case 8: per-event options"
+# --------------------------------------------------------------------------
+$h = New-TempHome
+Invoke-Installer -Home_ $h | Out-Null
+$n = Join-Path $h '.claude\claude-notify.ps1'
+$c = Join-Path $h '.claude\claude-notify.conf'
+
+# These cases only care what the notifier decided, not about hearing it, and a
+# tray balloon costs five seconds each time. Dry run resolves everything and
+# reports it without playing or notifying.
+$env:CLAUDE_NOTIFY_DRYRUN = '1'
+
+# Pull one "name=value" field out of a decision line.
+function Get-Field {
+    param([string]$Line, [string]$Name)
+    if ($Line -match "\s$Name=([^\s]*)") { return $matches[1] }
+    return ''
+}
+
+Write-Host "  (each kind gets its own defaults)"
+Check (Get-Field (Get-Decision 'done')    'pattern') '1x220' "done defaults to a single pulse"
+Check (Get-Field (Get-Decision 'blocked') 'pattern') '2x220' "blocked defaults to two"
+Check (Get-Field (Get-Decision 'limit')   'pattern') '3x140' "limit defaults to three, tighter"
+Check (Get-Field (Get-Decision 'done')    'volume')  '70'    "done is quieter than the alerts"
+Check (Get-Field (Get-Decision 'blocked') 'volume')  '100'   "blocked is at full volume"
+
+Write-Host "  (patterns are configurable)"
+Set-Conf 'DONE_PATTERN' '4x90'
+Check (Get-Field (Get-Decision 'done') 'pattern') '4x90'  "DONE_PATTERN is honoured"
+Set-Conf 'DONE_PATTERN' 'nonsense'
+Check (Get-Field (Get-Decision 'done') 'pattern') '1x220' "a malformed pattern falls back to one pulse"
+Set-Conf 'DONE_PATTERN' '99'
+Check (Get-Field (Get-Decision 'done') 'pattern') '6x220' "an absurd repeat count is capped"
+Set-Conf 'DONE_PATTERN' '1'
+
+Write-Host "  (volume is clamped)"
+Set-Conf 'DONE_VOLUME' '500'
+Check (Get-Field (Get-Decision 'done') 'volume') '100' "volume above 100 is clamped"
+Set-Conf 'DONE_VOLUME' 'abc'
+Check (Get-Field (Get-Decision 'done') 'volume') '100' "a non-numeric volume falls back"
+Set-Conf 'DONE_VOLUME' '70'
+
+Write-Host "  (per-event disable)"
+Set-Conf 'DONE_ENABLED' '0'
+Assert ((Get-Decision 'done') -like '*suppressed=muted*')    "DONE_ENABLED=0 silences just that kind"
+Assert ((Get-Decision 'blocked') -notlike '*suppressed=*')   "other kinds unaffected"
+Set-Conf 'DONE_ENABLED' '1'
+
+Write-Host "  (quiet hours)"
+Set-Conf 'QUIET_HOURS' '00:00-23:59'
+Assert ((Get-Decision 'blocked') -like '*suppressed=quiet-hours*') "an all-day window silences even ALWAYS_ALERT kinds"
+Set-Conf 'QUIET_HOURS' '00:00-00:01'
+Assert ((Get-Decision 'blocked') -notlike '*suppressed=quiet-hours*') "outside the window it alerts normally"
+Set-Conf 'QUIET_HOURS' 'not-a-window'
+Assert ((Get-Decision 'blocked') -notlike '*suppressed=quiet-hours*') "an unparseable window is ignored"
+Set-Conf 'QUIET_HOURS' ''
+
+Write-Host "  (a per-event sound file overrides the built-in choice)"
+$custom = Join-Path $h 'custom.wav'
+Copy-Item (Join-Path $env:SystemRoot 'Media\Windows Ding.wav') $custom -ErrorAction SilentlyContinue
+if (Test-Path $custom) {
+    Set-Conf 'DONE_SOUND' $custom
+    Assert ((Get-Field (Get-Decision 'done') 'sound') -like '*custom.wav') "DONE_SOUND takes precedence"
+    Set-Conf 'DONE_SOUND' ''
+} else {
+    Write-Host "        no system wav to copy, skipping"
+}
+$env:CLAUDE_NOTIFY_DRYRUN = $null
 Remove-Item $h -Recurse -Force -ErrorAction SilentlyContinue
 Write-Host ""
 

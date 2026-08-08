@@ -74,6 +74,11 @@ TOAST_ON_DONE=0
 DEBOUNCE_SECONDS=2
 ALWAYS_ALERT="blocked,limit,error"
 MUTE=""
+QUIET_HOURS=""
+DONE_VOLUME=70
+BLOCKED_VOLUME=100
+LIMIT_VOLUME=100
+ERROR_VOLUME=100
 
 # Read a KEY=value out of the config file. Never sources it, so a stray
 # backtick in someone's config cannot execute anything.
@@ -86,7 +91,8 @@ conf_get() {
 load_conf() {
   [ -f "$CONF_FILE" ] || return 0
   for key in MIN_SECONDS SUPPRESS_WHEN_FOCUSED PROJECT_PITCH SPEAK \
-             TOAST_ON_DONE DEBOUNCE_SECONDS ALWAYS_ALERT MUTE; do
+             TOAST_ON_DONE DEBOUNCE_SECONDS ALWAYS_ALERT MUTE QUIET_HOURS \
+             DONE_VOLUME BLOCKED_VOLUME LIMIT_VOLUME ERROR_VOLUME; do
     v=$(conf_get "$key")
     # An explicit if, not `[ -n "$v" ] && eval ...`: MUTE is empty by default and
     # is last in the list, so the short-circuit would make the loop return
@@ -184,6 +190,41 @@ ALWAYS_ALERT=$ALWAYS_ALERT
 
 # Alert kinds to silence completely. Comma separated, same names as above.
 MUTE=$MUTE
+
+# Stay silent inside this window, for example 23:00-08:00. Windows that wrap
+# past midnight work. Leave empty to disable.
+QUIET_HOURS=$QUIET_HOURS
+
+# ---------------------------------------------------------------------------
+# Per-event settings. One group per alert kind.
+#
+#   _ENABLED  0 turns this kind off completely
+#   _VOLUME   0-100. Ignored by aplay and canberra-gtk-play, which cannot set it
+#   _PATTERN  how many times to play, optionally NxMS for the gap in
+#             milliseconds. "3x120" is three pulses 120ms apart. Rhythm carries
+#             further than pitch when you are not paying attention
+#   _SOUND    absolute path to your own file, overriding the built-in choice
+# ---------------------------------------------------------------------------
+
+DONE_ENABLED=1
+DONE_VOLUME=$DONE_VOLUME
+DONE_PATTERN=1
+DONE_SOUND=
+
+BLOCKED_ENABLED=1
+BLOCKED_VOLUME=$BLOCKED_VOLUME
+BLOCKED_PATTERN=2
+BLOCKED_SOUND=
+
+LIMIT_ENABLED=1
+LIMIT_VOLUME=$LIMIT_VOLUME
+LIMIT_PATTERN=3x140
+LIMIT_SOUND=
+
+ERROR_ENABLED=1
+ERROR_VOLUME=$ERROR_VOLUME
+ERROR_PATTERN=2
+ERROR_SOUND=
 EOF
 }
 
@@ -336,6 +377,13 @@ CONF="$HOME/.claude/claude-notify.conf"
 TMP="${TMPDIR:-/tmp}"
 UID_=$(id -u 2>/dev/null || echo 0)
 
+# Normalise up front, so the per-event option lookups below cannot be fed an
+# arbitrary string from the command line.
+case "$KIND" in
+  mark|done|blocked|limit|error) ;;
+  *) KIND="done" ;;
+esac
+
 # --- options ------------------------------------------------------------------
 # Read, never sourced, so nothing in the config file can be executed.
 cfg() {
@@ -355,9 +403,36 @@ TOAST_ON_DONE=$(cfg TOAST_ON_DONE 0)
 DEBOUNCE_SECONDS=$(cfg DEBOUNCE_SECONDS 2)
 ALWAYS_ALERT=$(cfg ALWAYS_ALERT "blocked,limit,error")
 MUTE=$(cfg MUTE "")
+QUIET_HOURS=$(cfg QUIET_HOURS "")
+
+# Per-event options, keyed by the uppercased kind: DONE_VOLUME, BLOCKED_PATTERN
+# and so on. Flat keys rather than sections, so the parser above stays a single
+# sed expression and a v1.1.0 config keeps working untouched.
+KIND_UC=$(printf '%s' "$KIND" | tr 'a-z' 'A-Z')
+EV_ENABLED=$(cfg "${KIND_UC}_ENABLED" 1)
+EV_VOLUME=$(cfg "${KIND_UC}_VOLUME" 100)
+EV_SOUND=$(cfg "${KIND_UC}_SOUND" "")
+
+# How many times to play, and how far apart. "2" means twice at the default
+# spacing; "3x120" means three times, 120ms apart. Rhythm carries further than
+# pitch when you are not paying attention.
+case "$KIND" in
+  done) EV_PATTERN=$(cfg "DONE_PATTERN" "1") ;;
+  *)    EV_PATTERN=$(cfg "${KIND_UC}_PATTERN" "2") ;;
+esac
 
 case "$MIN_SECONDS" in ''|*[!0-9]*) MIN_SECONDS=30 ;; esac
 case "$DEBOUNCE_SECONDS" in ''|*[!0-9]*) DEBOUNCE_SECONDS=2 ;; esac
+case "$EV_VOLUME" in ''|*[!0-9]*) EV_VOLUME=100 ;; esac
+[ "$EV_VOLUME" -gt 100 ] 2>/dev/null && EV_VOLUME=100
+
+# Split "3x120" into count and gap.
+REPEAT_COUNT=$(printf '%s' "$EV_PATTERN" | cut -d x -f 1)
+REPEAT_GAP=$(printf '%s' "$EV_PATTERN" | cut -s -d x -f 2)
+case "$REPEAT_COUNT" in ''|*[!0-9]*) REPEAT_COUNT=1 ;; esac
+case "$REPEAT_GAP"   in ''|*[!0-9]*) REPEAT_GAP=220 ;; esac
+[ "$REPEAT_COUNT" -lt 1 ] && REPEAT_COUNT=1
+[ "$REPEAT_COUNT" -gt 6 ] && REPEAT_COUNT=6
 
 in_list() {  # in_list <needle> <comma,list>
   case ",$(printf '%s' "$2" | tr -d ' ')," in
@@ -413,9 +488,38 @@ if [ "$KIND" = "mark" ]; then
 fi
 
 # --- muted? -------------------------------------------------------------------
-if in_list "$KIND" "$MUTE"; then
+if in_list "$KIND" "$MUTE" || [ "$EV_ENABLED" = "0" ]; then
   [ "${CLAUDE_NOTIFY_DEBUG:-0}" = "1" ] && printf 'kind=%s suppressed=muted\n' "$KIND"
   exit 0
+fi
+
+# --- quiet hours? -------------------------------------------------------------
+# QUIET_HOURS=23:00-08:00, and windows that wrap past midnight are handled.
+# This lives in the config rather than in a resident process, so it works
+# whether or not anything else is running.
+if [ -n "$QUIET_HOURS" ]; then
+  qh_now=$(date +%H%M | sed 's/^0*//'); [ -n "$qh_now" ] || qh_now=0
+  qh_from=$(printf '%s' "$QUIET_HOURS" | cut -d- -f1 | tr -d ': ' | sed 's/^0*//')
+  qh_to=$(printf '%s'   "$QUIET_HOURS" | cut -s -d- -f2 | tr -d ': ' | sed 's/^0*//')
+  [ -n "$qh_from" ] || qh_from=0
+  [ -n "$qh_to" ] || qh_to=0
+  case "$qh_from$qh_to" in
+    *[!0-9]*) ;;   # unparseable, so ignore it rather than silencing everything
+    *)
+      qh_quiet=0
+      if [ "$qh_from" -le "$qh_to" ]; then
+        [ "$qh_now" -ge "$qh_from" ] && [ "$qh_now" -lt "$qh_to" ] && qh_quiet=1
+      else
+        # Wraps midnight, so either side of the boundary counts.
+        { [ "$qh_now" -ge "$qh_from" ] || [ "$qh_now" -lt "$qh_to" ]; } && qh_quiet=1
+      fi
+      if [ "$qh_quiet" = "1" ]; then
+        [ "${CLAUDE_NOTIFY_DEBUG:-0}" = "1" ] \
+          && printf 'kind=%s suppressed=quiet-hours window=%s\n' "$KIND" "$QUIET_HOURS"
+        exit 0
+      fi
+      ;;
+  esac
 fi
 
 # Kinds you always want to hear about ignore the elapsed and focus checks.
@@ -499,31 +603,26 @@ case "$KIND" in
     FD_SOUNDS="dialog-warning message dialog-information bell"
     TITLE="Claude needs you"
     FALLBACK="Waiting on your input or a permission prompt"
-    REPEAT=1
     ;;
   limit)
     MAC_SOUNDS="Basso Bottle Sosumi"
     FD_SOUNDS="suspend-error dialog-warning bell"
     TITLE="Claude hit the usage limit"
     FALLBACK="Rate limited. The turn ended early."
-    REPEAT=1
     ;;
   error)
     MAC_SOUNDS="Funk Blow Basso"
     FD_SOUNDS="dialog-error suspend-error dialog-warning bell"
     TITLE="Claude stopped"
     FALLBACK="The turn ended on an API error"
-    REPEAT=1
     ;;
   *)
-    KIND="done"
     # Several interchangeable chimes, so PROJECT_PITCH has something to choose
     # between. The first is the default when that option is off.
     MAC_SOUNDS="Glass Hero Submarine Tink Pop Purr"
     FD_SOUNDS="complete message bell dialog-information"
     TITLE="Claude is done"
     FALLBACK="Turn finished"
-    REPEAT=0
     ;;
 esac
 [ -n "$DETAIL" ] || DETAIL="$FALLBACK"
@@ -594,17 +693,44 @@ play_file() {
   # ALSA-only and headless boxes and just fails, and pw-play fails wherever
   # PipeWire is not the running server. So a failure has to fall through to the
   # next candidate rather than give up on the whole chain.
+  #
+  # Each player spells volume differently, and aplay and canberra cannot set it
+  # at all, so those two simply play at the system level.
   for p in afplay paplay pw-play canberra-gtk-play ffplay aplay; do
     command -v "$p" >/dev/null 2>&1 || continue
     case "$p" in
+      afplay)            "$p" -v "$(vol_frac)" "$1" >/dev/null 2>&1 ;;
+      paplay)            "$p" "--volume=$(( EV_VOLUME * 65536 / 100 ))" "$1" >/dev/null 2>&1 ;;
+      pw-play)           "$p" "--volume=$(vol_frac)" "$1" >/dev/null 2>&1 ;;
       canberra-gtk-play) "$p" -f "$1" >/dev/null 2>&1 ;;
-      ffplay)            "$p" -nodisp -autoexit -loglevel quiet "$1" >/dev/null 2>&1 ;;
+      ffplay)            "$p" -nodisp -autoexit -loglevel quiet -volume "$EV_VOLUME" "$1" >/dev/null 2>&1 ;;
       aplay)             case "$1" in *.wav) "$p" -q "$1" >/dev/null 2>&1 ;; *) false ;; esac ;;
-      *)                 "$p" "$1" >/dev/null 2>&1 ;;
     esac
     if [ $? -eq 0 ]; then PLAYER_USED="$p"; return 0; fi
   done
   return 1
+}
+
+# Volume as a 0.00-1.00 fraction, for the players that want it that way.
+# Done with integer arithmetic, because there is no floating point in POSIX sh.
+vol_frac() {
+  printf '%d.%02d' $(( EV_VOLUME / 100 )) $(( EV_VOLUME % 100 ))
+}
+
+# Play the alert REPEAT_COUNT times, REPEAT_GAP milliseconds apart.
+play_pattern() {
+  i=1
+  while [ "$i" -le "$REPEAT_COUNT" ]; do
+    if [ "$i" -gt 1 ]; then
+      # Split into whole seconds and milliseconds, so a gap of 1200 is 1.200
+      # rather than 0.1200.
+      sleep "$(printf '%d.%03d' $(( REPEAT_GAP / 1000 )) $(( REPEAT_GAP % 1000 )))" \
+        2>/dev/null || sleep 1
+    fi
+    "$@" || return 1
+    i=$((i + 1))
+  done
+  return 0
 }
 
 speak() {
@@ -627,24 +753,38 @@ bell() {
 }
 
 SOUND=""
-if [ "$SPEAK" = "1" ]; then
+if [ "${CLAUDE_NOTIFY_DRYRUN:-0}" = "1" ]; then
+  # Resolve everything and report it, but make no sound and raise no
+  # notification. Used by the tests, and by anything that wants to know what
+  # would happen without actually interrupting the user.
+  if [ -n "$EV_SOUND" ] && [ -f "$EV_SOUND" ]; then SOUND="$EV_SOUND"
+  else SOUND=$(find_sound || true); fi
+  PLAYER_USED="dryrun"
+elif [ "$SPEAK" = "1" ]; then
+  # Speech is read once regardless of the pattern: repeating a sentence is
+  # irritating rather than informative.
   speak "$TITLE. $DETAIL" || bell
 else
-  SOUND=$(find_sound || true)
-  if [ -n "$SOUND" ] && play_file "$SOUND"; then
-    if [ "$REPEAT" = "1" ]; then
-      sleep 0.22
-      play_file "$SOUND" || true
-    fi
+  # An explicit per-event sound wins over the candidate lists, so someone can
+  # point a kind at their own file without editing this script.
+  if [ -n "$EV_SOUND" ] && [ -f "$EV_SOUND" ]; then
+    SOUND="$EV_SOUND"
   else
-    bell
-    if [ "$REPEAT" = "1" ]; then sleep 0.12; bell; fi
+    SOUND=$(find_sound || true)
+  fi
+
+  if [ -n "$SOUND" ] && play_pattern play_file "$SOUND"; then
+    :
+  else
+    play_pattern bell
   fi
 fi
 
 # --- desktop notification ----------------------------------------------------
 NOTIFIED=no
-if [ "$KIND" != "done" ] || [ "$TOAST_ON_DONE" = "1" ]; then
+if [ "${CLAUDE_NOTIFY_DRYRUN:-0}" = "1" ]; then
+  :
+elif [ "$KIND" != "done" ] || [ "$TOAST_ON_DONE" = "1" ]; then
   if [ "$(uname -s)" = "Darwin" ]; then
     if command -v terminal-notifier >/dev/null 2>&1; then
       terminal-notifier -title "$TITLE" -message "$DETAIL" >/dev/null 2>&1 && NOTIFIED=terminal-notifier
@@ -670,8 +810,9 @@ fi
 # for working out why nothing is audible, and it is what CI asserts on, since a
 # zero exit alone cannot distinguish a played sound from a fallback bell.
 if [ "${CLAUDE_NOTIFY_DEBUG:-0}" = "1" ]; then
-  printf 'kind=%s sound=%s player=%s notified=%s elapsed=%s detail=%s\n' \
-    "$KIND" "${SOUND:-none}" "${PLAYER_USED:-bell}" "$NOTIFIED" "${ELAPSED:-na}" "$DETAIL"
+  printf 'kind=%s sound=%s player=%s volume=%s pattern=%sx%s notified=%s elapsed=%s detail=%s\n' \
+    "$KIND" "${SOUND:-none}" "${PLAYER_USED:-bell}" "$EV_VOLUME" \
+    "$REPEAT_COUNT" "$REPEAT_GAP" "$NOTIFIED" "${ELAPSED:-na}" "$DETAIL"
 fi
 
 exit 0

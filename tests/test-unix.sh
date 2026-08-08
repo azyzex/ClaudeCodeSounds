@@ -190,15 +190,34 @@ C="$H/.claude/claude-notify.conf"
 [ -f "$C" ] && ok "config file created" || bad "config file created"
 
 # Ask the notifier what it decided rather than inferring from a zero exit.
+# $H, $N and $C are set by whichever case is running.
 decide() {  # decide <kind> [payload]
   rm -f "${TMPDIR:-/tmp}"/claude-notify.*.last
   printf '%s' "${2:-\{\}}" \
     | HOME="$H" CLAUDE_NOTIFY_DEBUG=1 bash "$N" "$1" 2>/dev/null | tr -d '\r'
 }
 
+# Set a key via python rather than sed: some values are absolute paths, and a
+# slash in the replacement would collide with the s/// delimiter.
 setconf() {  # setconf KEY VALUE
-  sed -i.bak "s/^$1=.*/$1=$2/" "$C" && rm -f "$C.bak"
+  CONF_PATH="$C" CONF_KEY="$1" CONF_VAL="$2" "$PY" - <<'SETCONFEOF'
+import io, os, re
+path = os.environ['CONF_PATH']; key = os.environ['CONF_KEY']; val = os.environ['CONF_VAL']
+lines = io.open(path, encoding='utf-8').read().split('\n')
+out, seen = [], False
+for line in lines:
+    if re.match(r'^%s\s*=' % re.escape(key), line):
+        out.append('%s=%s' % (key, val)); seen = True
+    else:
+        out.append(line)
+if not seen:
+    out.append('%s=%s' % (key, val))
+io.open(path, 'w', encoding='utf-8', newline='\n').write('\n'.join(out))
+SETCONFEOF
 }
+
+# Pull one "name=value" field out of a decision line.
+field() { printf '%s' "$1" | sed -n "s/.*[ ]$2=\([^ ]*\).*/\1/p"; }
 
 echo "  (mute)"
 setconf MUTE "done"
@@ -262,6 +281,78 @@ printf '{}' | HOME="$H" bash "$N" blocked >/dev/null 2>&1 || true
 echo "  (config survives a reinstall)"
 HOME="$H" NO_TEST_TONE=1 NONINTERACTIVE=1 bash "$INSTALLER" >/dev/null 2>&1
 grep -q 'pwned' "$C" && ok "existing config left untouched by reinstall" || bad "reinstall overwrote the config"
+rm -rf "$H"
+echo
+
+# --------------------------------------------------------------------------
+echo "case 8: per-event options"
+# --------------------------------------------------------------------------
+H=$(mktemp -d)
+HOME="$H" NO_TEST_TONE=1 NONINTERACTIVE=1 bash "$INSTALLER" >/dev/null 2>&1
+N="$H/.claude/claude-notify.sh"
+C="$H/.claude/claude-notify.conf"
+
+# These checks only care what the notifier decided, not about hearing it. Dry
+# run resolves everything and reports it without playing or notifying.
+export CLAUDE_NOTIFY_DRYRUN=1
+
+echo "  (each kind gets its own defaults)"
+check "$(field "$(decide "done")" pattern)"  "1x220" "done defaults to a single pulse"
+check "$(field "$(decide blocked)" pattern)" "2x220" "blocked defaults to two"
+check "$(field "$(decide limit)" pattern)"   "3x140" "limit defaults to three, tighter"
+check "$(field "$(decide "done")" volume)"   "70"    "done is quieter than the alerts"
+check "$(field "$(decide blocked)" volume)"  "100"   "blocked is at full volume"
+
+echo "  (patterns are configurable)"
+setconf DONE_PATTERN "4x90"
+check "$(field "$(decide "done")" pattern)" "4x90"  "DONE_PATTERN is honoured"
+setconf DONE_PATTERN "nonsense"
+check "$(field "$(decide "done")" pattern)" "1x220" "a malformed pattern falls back to one pulse"
+setconf DONE_PATTERN "99"
+check "$(field "$(decide "done")" pattern)" "6x220" "an absurd repeat count is capped"
+setconf DONE_PATTERN "1"
+
+echo "  (volume is clamped)"
+setconf DONE_VOLUME "500"
+check "$(field "$(decide "done")" volume)" "100" "volume above 100 is clamped"
+setconf DONE_VOLUME "abc"
+check "$(field "$(decide "done")" volume)" "100" "a non-numeric volume falls back"
+setconf DONE_VOLUME "70"
+
+echo "  (per-event disable)"
+setconf DONE_ENABLED 0
+r=$(decide "done")
+case "$r" in *suppressed=muted*) ok "DONE_ENABLED=0 silences just that kind" ;; *) bad "expected muted, got: $r" ;; esac
+r=$(decide blocked)
+case "$r" in *suppressed=*) bad "DONE_ENABLED=0 leaked to blocked" ;; *) ok "other kinds unaffected" ;; esac
+setconf DONE_ENABLED 1
+
+echo "  (quiet hours)"
+# A window covering the whole day must silence everything, even ALWAYS_ALERT.
+setconf QUIET_HOURS "00:00-23:59"
+r=$(decide blocked)
+case "$r" in *suppressed=quiet-hours*) ok "an all-day window silences even ALWAYS_ALERT kinds" ;; *) bad "expected quiet-hours, got: $r" ;; esac
+# A window that has already closed must not.
+setconf QUIET_HOURS "00:00-00:01"
+r=$(decide blocked)
+case "$r" in *suppressed=quiet-hours*) bad "silenced outside the window: $r" ;; *) ok "outside the window it alerts normally" ;; esac
+# Garbage must not silence everything.
+setconf QUIET_HOURS "not-a-window"
+r=$(decide blocked)
+case "$r" in *suppressed=quiet-hours*) bad "unparseable window silenced everything" ;; *) ok "an unparseable window is ignored" ;; esac
+setconf QUIET_HOURS ""
+
+echo "  (a per-event sound file overrides the built-in choice)"
+custom="$H/custom.wav"; : > "$custom"
+setconf DONE_SOUND "$custom"
+# Compared by basename: under Git Bash the path is rewritten to its native form
+# in transit, which is a harness artifact rather than anything the notifier did.
+got=$(field "$(decide "done")" sound)
+case "$got" in
+  */custom.wav) ok "DONE_SOUND takes precedence" ;;
+  *) bad "DONE_SOUND takes precedence (got '$got')" ;;
+esac
+unset CLAUDE_NOTIFY_DRYRUN
 rm -rf "$H"
 echo
 
