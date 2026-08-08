@@ -211,7 +211,7 @@ it deliberately stayed quiet for. It can install and remove the hooks itself, so
 a machine that has never run the scripts needs no terminal.
 
 Downloads are per platform, on the [releases page](https://github.com/azyzex/ClaudeCodeSounds/releases):
-`.msi` for Windows, `.dmg` for macOS (separate Apple Silicon and Intel builds),
+`.msi` for Windows, `.dmg` for macOS (one universal build for both Apple Silicon and Intel),
 and `.AppImage` or `.deb` for Linux.
 
 The builds are unsigned, because signing certificates cost money and this

@@ -23,14 +23,13 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # macOS is built twice rather than as a universal binary: two smaller
-          # downloads, and the Apple Silicon runner does not have to emulate.
+          # One universal build rather than one per architecture. Two separate
+          # builds would give smaller downloads, but the Intel runner queues for
+          # tens of minutes and is on its way out, and a release that waits on a
+          # scarce runner is worse than a download twice the size.
           - os: macos-14
-            label: macOS (Apple Silicon)
-            target: aarch64-apple-darwin
-          - os: macos-13
-            label: macOS (Intel)
-            target: x86_64-apple-darwin
+            label: macOS (universal)
+            target: universal-apple-darwin
           - os: ubuntu-22.04
             label: Linux
             target: x86_64-unknown-linux-gnu
@@ -42,8 +41,15 @@ jobs:
         with:
           ref: ${{ github.event.inputs.tag || github.ref }}
 
-      - name: Rust target
-        run: rustup target add ${{ matrix.target }}
+      - name: Rust targets
+        shell: bash
+        run: |
+          if [ "${{ matrix.target }}" = "universal-apple-darwin" ]; then
+            # A universal binary is two real targets stitched together.
+            rustup target add aarch64-apple-darwin x86_64-apple-darwin
+          else
+            rustup target add "${{ matrix.target }}"
+          fi
 
       # Built on the oldest supported Ubuntu on purpose: glibc is backwards
       # compatible but not forwards, so a binary built on a newer release will
@@ -81,9 +87,7 @@ jobs:
             Windows) suffix="windows-x64.msi";     find "$root" -name '*.msi'      -exec cp {} "dist/ClaudeCodeSounds-$version-$suffix" \; ;;
             Linux)   suffix="linux-x86_64.AppImage"; find "$root" -name '*.AppImage' -exec cp {} "dist/ClaudeCodeSounds-$version-$suffix" \;
                      find "$root" -name '*.deb' -exec cp {} "dist/ClaudeCodeSounds-$version-linux-amd64.deb" \; ;;
-            macOS)   arch="${{ matrix.target }}"
-                     case "$arch" in aarch64*) suffix="macos-apple-silicon.dmg" ;; *) suffix="macos-intel.dmg" ;; esac
-                     find "$root" -name '*.dmg' -exec cp {} "dist/ClaudeCodeSounds-$version-$suffix" \; ;;
+            macOS)   find "$root" -name '*.dmg' -exec cp {} "dist/ClaudeCodeSounds-$version-macos-universal.dmg" \; ;;
           esac
           ls -la dist
 
@@ -126,8 +130,7 @@ jobs:
             | Platform | File |
             | --- | --- |
             | Windows | `*-windows-x64.msi` |
-            | macOS, Apple Silicon | `*-macos-apple-silicon.dmg` |
-            | macOS, Intel | `*-macos-intel.dmg` |
+            | macOS, Apple Silicon or Intel | `*-macos-universal.dmg` |
             | Linux | `*-linux-x86_64.AppImage` or `*-linux-amd64.deb` |
 
             These builds are **unsigned**, because signing certificates cost
