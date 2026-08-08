@@ -14,6 +14,11 @@
 
 *.py   text eol=lf
 *.yml  text eol=lf
+
+# The bundled sounds. Marked binary explicitly rather than relying on Git's
+# heuristic: any newline conversion would corrupt the PCM, and they are embedded
+# into the installers as base64, so the corruption would ship.
+*.wav binary
 *.md   text
 LICENSE text
 

@@ -15,11 +15,14 @@ CI runs --check, so a change to a notifier that is not regenerated fails the
 build rather than silently shipping a stale installer.
 """
 
+import base64
+import glob
 import io
 import os
 import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+SOUNDS = os.path.join(ROOT, 'sounds')
 
 # template -> (placeholder, notifier source, generated installer)
 TARGETS = [
@@ -41,6 +44,24 @@ TARGETS = [
 def read(path):
     with io.open(os.path.join(ROOT, path), encoding='utf-8', newline='') as f:
         return f.read()
+
+
+def sound_blob():
+    """The bundled sounds as 'name.wav|base64', one per line.
+
+    Embedded rather than downloaded, so the installers stay a single file with
+    no network dependency at install time. PCM tones are high entropy and gzip
+    only takes about 4% off, so the size is managed in build/make-sounds.py by
+    keeping the rate and the durations down instead.
+    """
+    lines = []
+    for path in sorted(glob.glob(os.path.join(SOUNDS, '*.wav'))):
+        with open(path, 'rb') as f:
+            data = base64.b64encode(f.read()).decode('ascii')
+        lines.append('%s|%s' % (os.path.basename(path), data))
+    if not lines:
+        raise SystemExit('no sounds found in sounds/. Run: python build/make-sounds.py')
+    return '\n'.join(lines)
 
 
 def render(template_path, placeholder, notifier_path):
@@ -65,7 +86,10 @@ def render(template_path, placeholder, notifier_path):
                     'embedded block early' % (notifier_path, i, bad)
                 )
 
-    return template.replace(placeholder, notifier).replace('\r\n', '\n')
+    out = template.replace(placeholder, notifier)
+    if '@@SOUNDS@@' in out:
+        out = out.replace('@@SOUNDS@@', sound_blob())
+    return out.replace('\r\n', '\n')
 
 
 def main():

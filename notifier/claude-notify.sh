@@ -12,6 +12,7 @@
 
 KIND="${1:-done}"
 CONF="$HOME/.claude/claude-notify.conf"
+SOUND_DIR="$HOME/.claude/claude-sounds"
 TMP="${TMPDIR:-/tmp}"
 UID_=$(id -u 2>/dev/null || echo 0)
 
@@ -237,18 +238,21 @@ printf '%s' "$NOW" > "$STAMP" 2>/dev/null || true
 # of StopFailure buys nothing audible.
 case "$KIND" in
   blocked)
+    BUNDLED_SOUNDS="alert-attention"
     MAC_SOUNDS="Sosumi Ping Funk"
     FD_SOUNDS="dialog-warning message dialog-information bell"
     TITLE="Claude needs you"
     FALLBACK="Waiting on your input or a permission prompt"
     ;;
   limit)
+    BUNDLED_SOUNDS="alert-limit"
     MAC_SOUNDS="Basso Bottle Sosumi"
     FD_SOUNDS="suspend-error dialog-warning bell"
     TITLE="Claude hit the usage limit"
     FALLBACK="Rate limited. The turn ended early."
     ;;
   error)
+    BUNDLED_SOUNDS="alert-error"
     MAC_SOUNDS="Funk Blow Basso"
     FD_SOUNDS="dialog-error suspend-error dialog-warning bell"
     TITLE="Claude stopped"
@@ -257,6 +261,7 @@ case "$KIND" in
   *)
     # Several interchangeable chimes, so PROJECT_PITCH has something to choose
     # between. The first is the default when that option is off.
+    BUNDLED_SOUNDS="chime-glass chime-soft chime-bright chime-low chime-warm chime-mid"
     MAC_SOUNDS="Glass Hero Submarine Tink Pop Purr"
     FD_SOUNDS="complete message bell dialog-information"
     TITLE="Claude is done"
@@ -299,11 +304,19 @@ rotate() {
 }
 
 if [ "$PITCH_IDX" -gt 0 ]; then
+  BUNDLED_SOUNDS=$(rotate "$BUNDLED_SOUNDS" "$PITCH_IDX")
   MAC_SOUNDS=$(rotate "$MAC_SOUNDS" "$PITCH_IDX")
   FD_SOUNDS=$(rotate "$FD_SOUNDS" "$PITCH_IDX")
 fi
 
 find_sound() {
+  # Bundled sounds first. They are the same on every machine, which is what
+  # makes the alerts consistent and PROJECT_PITCH meaningful. The system themes
+  # below stay as a fallback for anyone who deletes them.
+  for n in $BUNDLED_SOUNDS; do
+    [ -f "$SOUND_DIR/$n.wav" ] && { printf '%s' "$SOUND_DIR/$n.wav"; return 0; }
+  done
+
   if [ "$(uname -s)" = "Darwin" ]; then
     for n in $MAC_SOUNDS; do
       for d in "$HOME/Library/Sounds" /System/Library/Sounds; do

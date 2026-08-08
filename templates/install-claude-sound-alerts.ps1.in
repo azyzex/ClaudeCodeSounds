@@ -22,6 +22,7 @@
  WHAT IT TOUCHES
    ~/.claude/claude-notify.ps1     created / overwritten
    ~/.claude/claude-notify.conf    created if absent, never overwritten
+   ~/.claude/claude-sounds/        the bundled alert sounds
    ~/.claude/settings.json         backed up, then five hook entries added
 
  SAFE TO RE-RUN. It replaces its own hook entries and leaves everything
@@ -42,6 +43,7 @@ $ErrorActionPreference = 'Stop'
 $claudeDir    = Join-Path $env:USERPROFILE '.claude'
 $notifyScript = Join-Path $claudeDir 'claude-notify.ps1'
 $confFile     = Join-Path $claudeDir 'claude-notify.conf'
+$soundDir     = Join-Path $claudeDir 'claude-sounds'
 $settingsPath = Join-Path $claudeDir 'settings.json'
 $marker       = 'claude-notify.ps1'   # how we recognise our own hook entries
 
@@ -357,6 +359,7 @@ if ($Uninstall) {
     if ($hooks.Count -eq 0) { $settings.Remove('hooks') }
     Save-Json -Data $settings -Path $settingsPath
     if (Test-Path $notifyScript) { Remove-Item $notifyScript -Force }
+    if (Test-Path $soundDir) { Remove-Item $soundDir -Recurse -Force }
     Write-Ok "removed. restart Claude Code."
     Write-Dim "left claude-notify.conf in place, in case you reinstall"
     Write-Host ""
@@ -385,6 +388,35 @@ $notifyBody = @'
 
 Set-Content -Path $notifyScript -Value $notifyBody -Encoding utf8
 Write-Ok "wrote claude-notify.ps1"
+
+# ------------------------------------------------------------- the sounds ---
+# Written out from the base64 block at the end of this file, so a machine with
+# an unusual Windows image still gets real audio instead of a console beep.
+
+$soundBlob = @'
+@@SOUNDS@@
+'@
+
+New-Item -ItemType Directory -Path $soundDir -Force | Out-Null
+$soundCount = 0
+foreach ($line in ($soundBlob -split "`n")) {
+    $line = $line.Trim()
+    if (-not $line) { continue }
+    $parts = $line -split '\|', 2
+    if ($parts.Count -ne 2) { continue }
+    try {
+        [System.IO.File]::WriteAllBytes(
+            (Join-Path $soundDir $parts[0]),
+            [Convert]::FromBase64String($parts[1]))
+        $soundCount++
+    } catch { }
+}
+
+if ($soundCount -gt 0) {
+    Write-Ok "wrote $soundCount sounds to claude-sounds\"
+} else {
+    Write-Step "could not write the bundled sounds, falling back to system sounds"
+}
 
 # --------------------------------------------------------------------- test ---
 

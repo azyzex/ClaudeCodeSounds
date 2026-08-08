@@ -42,9 +42,16 @@ Rule exclusions live in `.github/PSScriptAnalyzerSettings.psd1`, each with the r
 ```
 templates/install-claude-sound-alerts.sh.in   the installer logic
 notifier/claude-notify.sh                     the notifier it writes out
+sounds/*.wav                                  embedded as base64
         |
         +--> build/generate.py --> install-claude-sound-alerts.sh
 ```
+
+The sounds themselves come from `build/make-sounds.py`, which synthesises them
+so they are reproducible and carry no licensing question. Run it only when
+changing the sound design, then regenerate the installers. Keep them small:
+they are embedded as base64 in a script people pipe from a URL, and PCM tones
+barely compress, so size has to come from the sample rate and the duration.
 
 Edit the template or the notifier, then regenerate:
 

@@ -352,6 +352,32 @@ case "$got" in
   */custom.wav) ok "DONE_SOUND takes precedence" ;;
   *) bad "DONE_SOUND takes precedence (got '$got')" ;;
 esac
+echo "  (bundled sounds)"
+setconf DONE_SOUND ""   # the previous case pointed this at a custom file
+n_sounds=$(ls "$H/.claude/claude-sounds"/*.wav 2>/dev/null | wc -l)
+[ "$n_sounds" -ge 9 ] && ok "the installer wrote $n_sounds sounds" || bad "expected 9 bundled sounds, found $n_sounds"
+"$PY" - "$H/.claude/claude-sounds" <<'PYEOF' && ok "every bundled sound is a valid WAV" || bad "a bundled sound is not valid"
+import glob, os, sys, wave
+for f in sorted(glob.glob(os.path.join(sys.argv[1], '*.wav'))):
+    w = wave.open(f)
+    assert w.getnchannels() == 1 and w.getsampwidth() == 2 and w.getnframes() > 1000, f
+    w.close()
+PYEOF
+
+# The whole point of bundling: no system sound theme, still real audio. Every
+# kind must resolve to a bundled file rather than falling through to the bell.
+for k in "done" blocked limit error; do
+  got=$(field "$(decide "$k")" sound)
+  case "$got" in
+    */claude-sounds/*.wav) ok "$k resolves to a bundled sound" ;;
+    *) bad "$k did not use a bundled sound (got '$got')" ;;
+  esac
+done
+
+# Distinct sounds are what make four events worth having.
+sounds=$(for k in "done" blocked limit error; do basename "$(field "$(decide "$k")" sound)"; done | sort -u | wc -l)
+check "$sounds" "4" "the four kinds resolve to four different sounds"
+
 unset CLAUDE_NOTIFY_DRYRUN
 rm -rf "$H"
 echo

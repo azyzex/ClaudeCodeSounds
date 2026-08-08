@@ -52,6 +52,7 @@ The installer plays a test tone at the end. If you hear it, the audio path works
 Two files, both under `~/.claude`:
 
 - `claude-notify.ps1` or `claude-notify.sh` is created. This is the script that actually picks a sound and plays it.
+- `claude-sounds/` is created, holding the nine bundled alert sounds.
 - `settings.json` is backed up with a timestamp, then the hook entries are added to it.
 - `claude-notify.conf` is created if absent. Your edits to it are never overwritten.
 
@@ -140,9 +141,13 @@ How well the focus check works varies by platform, and it is deliberately conser
 
 Everything in the table above is a config change. Only the sound files themselves need editing `~/.claude/claude-notify.ps1` or `~/.claude/claude-notify.sh`, and re-running the installer overwrites those, so keep a copy of your changes. Your config file is safe either way.
 
-Each alert kind has a list of candidate sound files and the first one that exists on the machine wins, so put your own file at the front of the list. Windows looks in `C:\Windows\Media`; macOS looks in `~/Library/Sounds` and `/System/Library/Sounds`; Linux looks through the freedesktop sound theme directories.
+Nine sounds are installed to `~/.claude/claude-sounds/`, and they are what you hear by default on every platform. That is deliberate: relying on system sounds meant the alerts differed per machine, and on a minimal Linux install there were often none at all.
 
-The finish sound has several interchangeable candidates so that `PROJECT_PITCH` has something to choose between. Adding more gives it a wider range.
+The quickest way to use your own is `<KIND>_SOUND` in the config, which takes a full path and needs no editing of any script.
+
+If the bundled sounds are missing, the notifier falls back to the system set: `C:\Windows\Media` on Windows, `~/Library/Sounds` and `/System/Library/Sounds` on macOS, and the freedesktop theme directories on Linux.
+
+The sounds are generated rather than sourced, by `build/make-sounds.py`, so they are reproducible and carry no licensing question. Six of the nine are interchangeable finish chimes, which is what gives `PROJECT_PITCH` its range.
 
 ## Troubleshooting
 

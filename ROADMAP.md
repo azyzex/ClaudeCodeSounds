@@ -37,7 +37,7 @@ Everything the app will need to configure.
 - [x] Rhythm patterns (`3x140`)
 - [x] Quiet hours
 - [x] `CLAUDE_NOTIFY_DRYRUN=1`, which the app also needs for previewing
-- [ ] **Bundled sounds** — a known set, shipped with the project
+- [x] **Bundled sounds** — nine synthesised sounds, embedded as base64
 - [ ] **Sound packs** — a pack is a folder, so people can make their own
 - [ ] Docs and a v1.2.0 release
 

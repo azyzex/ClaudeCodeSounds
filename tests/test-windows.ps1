@@ -375,6 +375,32 @@ if (Test-Path $custom) {
 } else {
     Write-Host "        no system wav to copy, skipping"
 }
+Write-Host "  (bundled sounds)"
+Set-Conf 'DONE_SOUND' ''   # the previous case pointed this at a custom file
+$sd = Join-Path $h '.claude\claude-sounds'
+$wavs = @(Get-ChildItem $sd -Filter '*.wav' -ErrorAction SilentlyContinue)
+Assert ($wavs.Count -ge 9) "the installer wrote $($wavs.Count) sounds"
+
+# Valid RIFF/WAVE headers, not just files of the right name.
+$badWav = $false
+foreach ($w in $wavs) {
+    $bytes = [System.IO.File]::ReadAllBytes($w.FullName)
+    if ($bytes.Length -lt 1000) { $badWav = $true; continue }
+    if ([Text.Encoding]::ASCII.GetString($bytes, 0, 4) -ne 'RIFF') { $badWav = $true }
+    if ([Text.Encoding]::ASCII.GetString($bytes, 8, 4) -ne 'WAVE') { $badWav = $true }
+}
+Assert (-not $badWav) "every bundled sound is a valid WAV"
+
+# The whole point of bundling: whatever this Windows image ships, every kind
+# still gets a real sound rather than a console beep.
+$picked = @()
+foreach ($k in @('done','blocked','limit','error')) {
+    $s = Get-Field (Get-Decision $k) 'sound'
+    $picked += (Split-Path $s -Leaf)
+    Assert ($s -like '*claude-sounds*') "$k resolves to a bundled sound"
+}
+Check (($picked | Sort-Object -Unique).Count) 4 "the four kinds resolve to four different sounds"
+
 $env:CLAUDE_NOTIFY_DRYRUN = $null
 Remove-Item $h -Recurse -Force -ErrorAction SilentlyContinue
 Write-Host ""

@@ -20,6 +20,7 @@
 #  WHAT IT TOUCHES
 #    ~/.claude/claude-notify.sh     created / overwritten
 #    ~/.claude/claude-notify.conf   created if absent, never overwritten
+#    ~/.claude/claude-sounds/       the bundled alert sounds
 #    ~/.claude/settings.json        backed up, then hook entries added
 #
 #  SAFE TO RE-RUN. It replaces its own hook entries and leaves everything
@@ -36,6 +37,7 @@ set -euo pipefail
 CLAUDE_DIR="$HOME/.claude"
 NOTIFY_SCRIPT="$CLAUDE_DIR/claude-notify.sh"
 CONF_FILE="$CLAUDE_DIR/claude-notify.conf"
+SOUND_DIR="$CLAUDE_DIR/claude-sounds"
 SETTINGS="$CLAUDE_DIR/settings.json"
 MARKER="claude-notify.sh"    # how we recognise our own hook entries
 
@@ -349,6 +351,7 @@ PYEOF
 
 if [ "$MODE" = "uninstall" ]; then
   rm -f "$NOTIFY_SCRIPT"
+  rm -rf "$SOUND_DIR"
   ok "removed. restart Claude Code."
   dim "left $(basename "$CONF_FILE") in place, in case you reinstall"
   printf '\n'
@@ -365,6 +368,32 @@ NOTIFYEOF
 
 chmod +x "$NOTIFY_SCRIPT"
 ok "wrote $(basename "$NOTIFY_SCRIPT")"
+
+# ------------------------------------------------------------ the sounds ---
+# Written out from the base64 block at the end of this file, so a machine with
+# no system sound theme still gets real audio instead of a terminal bell.
+
+mkdir -p "$SOUND_DIR"
+sound_count=0
+while IFS='|' read -r sound_name sound_b64; do
+  [ -n "$sound_name" ] || continue
+  [ -n "$sound_b64" ] || continue
+  if printf '%s' "$sound_b64" \
+     | "$PY" -c 'import base64,sys; sys.stdout.buffer.write(base64.b64decode(sys.stdin.read()))' \
+     > "$SOUND_DIR/$sound_name" 2>/dev/null; then
+    sound_count=$((sound_count + 1))
+  else
+    rm -f "$SOUND_DIR/$sound_name"
+  fi
+done <<'SOUNDSEOF'
+@@SOUNDS@@
+SOUNDSEOF
+
+if [ "$sound_count" -gt 0 ]; then
+  ok "wrote $sound_count sounds to $(basename "$SOUND_DIR")/"
+else
+  step "could not write the bundled sounds, falling back to system sounds"
+fi
 
 # --------------------------------------------------------------------- test ---
 

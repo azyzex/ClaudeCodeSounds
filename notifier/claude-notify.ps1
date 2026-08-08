@@ -17,6 +17,7 @@ param([ValidateSet('mark','done','blocked','limit','error')][string]$Kind = 'don
 $ErrorActionPreference = 'SilentlyContinue'
 
 $confFile = Join-Path $env:USERPROFILE '.claude\claude-notify.conf'
+$soundDir = Join-Path $env:USERPROFILE '.claude\claude-sounds'
 $debug    = ($env:CLAUDE_NOTIFY_DEBUG -eq '1')
 
 # --- options ------------------------------------------------------------------
@@ -212,18 +213,21 @@ Set-Content -Path $stamp -Value $Kind -Encoding ascii
 # of StopFailure buys nothing audible.
 switch ($Kind) {
     'blocked' {
+        $bundled  = @('alert-attention')
         $wavs     = @('Windows Exclamation.wav','Windows Notify Messaging.wav','chord.wav')
         $title    = 'Claude needs you'
         $fallback = 'Waiting on your input or a permission prompt'
         $icon     = 'Warning'; $freq = 740
     }
     'limit' {
+        $bundled  = @('alert-limit')
         $wavs     = @('Windows Critical Stop.wav','Windows Battery Critical.wav','chord.wav')
         $title    = 'Claude hit the usage limit'
         $fallback = 'Rate limited. The turn ended early.'
         $icon     = 'Error'; $freq = 440
     }
     'error' {
+        $bundled  = @('alert-error')
         $wavs     = @('Windows Hardware Fail.wav','Windows Foreground.wav','Windows Error.wav','chimes.wav')
         $title    = 'Claude stopped'
         $fallback = 'The turn ended on an API error'
@@ -232,6 +236,7 @@ switch ($Kind) {
     default {
         # Several interchangeable chimes, so PROJECT_PITCH has something to
         # choose between. The first is the default when that option is off.
+        $bundled  = @('chime-glass','chime-soft','chime-bright','chime-low','chime-warm','chime-mid')
         $wavs     = @('Windows Notify System Generic.wav','notify.wav','Windows Ding.wav','chimes.wav','Windows Balloon.wav','Windows Notify.wav')
         $title    = 'Claude is done'
         $fallback = 'Turn finished'
@@ -248,6 +253,8 @@ if ($opt['PROJECT_PITCH'] -eq '1' -and $Kind -eq 'done' -and $cwd) {
     foreach ($ch in $cwd.ToCharArray()) { $hash = ($hash * 31 + [int]$ch) % 100000 }
     $shift = $hash % $wavs.Count
     if ($shift -gt 0) { $wavs = $wavs[$shift..($wavs.Count-1)] + $wavs[0..($shift-1)] }
+    $bshift = $hash % $bundled.Count
+    if ($bshift -gt 0) { $bundled = $bundled[$bshift..($bundled.Count-1)] + $bundled[0..($bshift-1)] }
 }
 
 # --- play ---------------------------------------------------------------------
@@ -271,6 +278,15 @@ if (-not $playerUsed) {
     if ($evSound -and (Test-Path $evSound)) {
         $soundPath = $evSound
     } else {
+        # Bundled sounds first. They are the same on every machine, which is
+        # what makes the alerts consistent and PROJECT_PITCH meaningful. The
+        # Windows Media set stays as a fallback for anyone who deletes them.
+        foreach ($b in $bundled) {
+            $p = Join-Path $soundDir "$b.wav"
+            if (Test-Path $p) { $soundPath = $p; break }
+        }
+    }
+    if (-not $soundPath) {
         foreach ($w in $wavs) {
             $p = Join-Path $env:SystemRoot "Media\$w"
             if (Test-Path $p) { $soundPath = $p; break }
