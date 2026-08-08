@@ -85,6 +85,47 @@ uninstalling the app leaves them working.
   feature that genuinely needs a resident process, since a hook exits at once.
 - Launch at login, opt in
 
+## Phase 4 — the quiet-and-useful release
+
+Agreed 2026-08-09. Everything here except escalation is mostly reading state
+that already exists.
+
+- [ ] **Escalation** — re-alert if a blocked prompt goes unanswered for a
+      while. The only feature that genuinely needs a resident process, since a
+      hook exits at once. The tray now gives it somewhere to live.
+- [ ] **Launch at login**, opt in. Escalation is useless without it.
+- [ ] **Respect the OS do-not-disturb** — Windows Focus Assist, and the desktop
+      equivalents on Linux. `QUIET_HOURS` currently duplicates something the OS
+      already knows.
+- [ ] **Stats** — turns today, median duration, time spent blocked. The log
+      already carries timestamps and durations.
+- [ ] **Health check** — one command answering "why is nothing happening": are
+      the hooks registered, is the notifier present, does a player exist, is a
+      mute active, did anything fire recently.
+- [ ] **Auto-update** for the app. Tauri's updater signs with its own free
+      keypair, so it costs nothing. Without it, nobody learns a new version
+      exists.
+- [ ] **A small CLI** — `mute 1h`, `test blocked`, `status`. Terminal people
+      will not open a window for that.
+- [ ] **More hook events** — `PreCompact` is the interesting one, since a
+      heads-up that context is about to compact is actionable. `SubagentStop`
+      and `PermissionDenied` are nearly free alongside it.
+
+## Phase 5 — usage-limit reset notifier
+
+The feature that motivated PROJECT-OVERVIEW.md, and the one thing here that
+does not exist in any form yet. Being told "you can work again" is worth more
+than being told "you are blocked", because the second is obvious the moment it
+happens.
+
+- [ ] Establish where the reset time comes from: parsed from the rate-limit
+      payload if it is there, otherwise an estimate that is labelled as one
+- [ ] Desktop notification at reset, fired by the tray process
+- [ ] Phone push via ntfy.sh, opt in and off by default
+- [ ] Countdown in the app and the tray tooltip
+- [ ] Survive sleep: store an absolute timestamp and check on wake, rather than
+      relying on a timer
+
 ## Deliberately not doing
 
 | Idea | Why not |
