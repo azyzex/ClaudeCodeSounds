@@ -134,6 +134,7 @@ $opt = [ordered]@{
     ALWAYS_ALERT          = 'blocked,limit,error'
     MUTE                  = ''
     QUIET_HOURS           = ''
+    MUTE_UNTIL            = ''
     SOUND_PACK            = 'default'
     DONE_VOLUME           = '70'
     BLOCKED_VOLUME        = '100'
@@ -249,6 +250,10 @@ QUIET_HOURS=$($opt['QUIET_HOURS'])
 # and naming it here.
 SOUND_PACK=$($opt['SOUND_PACK'])
 
+# Silence everything until this epoch second. The desktop app's "quiet for an
+# hour" writes it; it expires by itself. Leave empty for no temporary mute.
+MUTE_UNTIL=$($opt['MUTE_UNTIL'])
+
 # ---------------------------------------------------------------------------
 # Per-event settings. One group per alert kind.
 #
@@ -281,7 +286,7 @@ ERROR_VOLUME=$($opt['ERROR_VOLUME'])
 ERROR_PATTERN=2
 ERROR_SOUND=
 "@
-    [System.IO.File]::WriteAllText($confFile, $text, (New-Object System.Text.UTF8Encoding($false)))
+    [System.IO.File]::WriteAllText($confFile, $text + "`n", (New-Object System.Text.UTF8Encoding($false)))
 }
 
 # ----------------------------------------------------------------- settings ---
@@ -427,6 +432,7 @@ $opt = @{
     ALWAYS_ALERT          = 'blocked,limit,error'
     MUTE                  = ''
     QUIET_HOURS           = ''
+    MUTE_UNTIL            = ''
     SOUND_PACK            = 'default'
 
     # Per-event, keyed by the uppercased kind. Flat keys rather than sections,
@@ -535,6 +541,18 @@ if ($Kind -eq 'mark') {
 if (-not $force -and ((Test-InList $Kind $opt['MUTE']) -or $evEnabled -eq '0')) {
     Write-Decision "kind=$Kind suppressed=muted"
     exit 0
+}
+
+# --- temporarily muted? -------------------------------------------------------
+# MUTE_UNTIL is an epoch second. The app's "quiet for an hour" writes one, and it
+# expires by itself, so a mute you forget about cannot silence things
+# permanently the way a plain flag would.
+if (-not $force -and $opt['MUTE_UNTIL'] -match '^\d+$') {
+    $nowEpoch = [int][double]::Parse((Get-Date -UFormat %s))
+    if ($nowEpoch -lt [int64]$opt['MUTE_UNTIL']) {
+        Write-Decision "kind=$Kind suppressed=quiet-until until=$($opt['MUTE_UNTIL'])"
+        exit 0
+    }
 }
 
 # --- quiet hours? -------------------------------------------------------------

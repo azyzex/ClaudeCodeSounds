@@ -347,6 +347,18 @@ r=$(decide blocked)
 case "$r" in *suppressed=quiet-hours*) bad "unparseable window silenced everything" ;; *) ok "an unparseable window is ignored" ;; esac
 setconf QUIET_HOURS ""
 
+echo "  (a temporary mute expires by itself)"
+setconf MUTE_UNTIL "$(( $(date +%s) + 3600 ))"
+r=$(decide blocked)
+case "$r" in *suppressed=quiet-until*) ok "a future MUTE_UNTIL silences everything" ;; *) bad "expected quiet-until, got: $r" ;; esac
+setconf MUTE_UNTIL "1"
+r=$(decide blocked)
+case "$r" in *suppressed=quiet-until*) bad "an expired mute still silenced: $r" ;; *) ok "an expired MUTE_UNTIL is ignored" ;; esac
+setconf MUTE_UNTIL "not-a-time"
+r=$(decide blocked)
+case "$r" in *suppressed=quiet-until*) bad "garbage silenced everything: $r" ;; *) ok "an unparseable MUTE_UNTIL is ignored" ;; esac
+setconf MUTE_UNTIL ""
+
 echo "  (a per-event sound file overrides the built-in choice)"
 custom="$H/custom.wav"; : > "$custom"
 setconf DONE_SOUND "$custom"

@@ -43,6 +43,7 @@ DEBOUNCE_SECONDS=$(cfg DEBOUNCE_SECONDS 2)
 ALWAYS_ALERT=$(cfg ALWAYS_ALERT "blocked,limit,error")
 MUTE=$(cfg MUTE "")
 QUIET_HOURS=$(cfg QUIET_HOURS "")
+MUTE_UNTIL=$(cfg MUTE_UNTIL "")
 SOUND_PACK=$(cfg SOUND_PACK "default")
 # A pack name is a single directory component, never a path.
 case "$SOUND_PACK" in ""|*/*|.*) SOUND_PACK="default" ;; esac
@@ -173,6 +174,20 @@ FORCE="${CLAUDE_NOTIFY_FORCE:-0}"
 if [ "$FORCE" != "1" ] && { in_list "$KIND" "$MUTE" || [ "$EV_ENABLED" = "0" ]; }; then
   record "kind=$KIND suppressed=muted"
   exit 0
+fi
+
+# --- temporarily muted? -------------------------------------------------------
+# MUTE_UNTIL is an epoch second. The app's "quiet for an hour" writes one, and
+# it expires by itself, so a mute you forget about cannot silence things
+# permanently the way a plain flag would.
+if [ "$FORCE" != "1" ]; then
+  case "$MUTE_UNTIL" in
+    ''|*[!0-9]*) ;;
+    *) if [ "$(date +%s)" -lt "$MUTE_UNTIL" ]; then
+         record "kind=$KIND suppressed=quiet-until until=$MUTE_UNTIL"
+         exit 0
+       fi ;;
+  esac
 fi
 
 # --- quiet hours? -------------------------------------------------------------

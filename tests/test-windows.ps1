@@ -212,9 +212,13 @@ function Get-Decision {
 
 function Set-Conf {
     param([string]$Key, [string]$Value)
-    $lines = Get-Content $c | ForEach-Object {
-        if ($_ -match "^$Key=") { "$Key=$Value" } else { $_ }
-    }
+    $seen = $false
+    $lines = @(Get-Content $c | ForEach-Object {
+        if ($_ -match "^$Key=") { $seen = $true; "$Key=$Value" } else { $_ }
+    })
+    # Append when the key is not already there. Without this the helper silently
+    # does nothing for any key the installer does not write by default.
+    if (-not $seen) { $lines += "$Key=$Value" }
     [System.IO.File]::WriteAllLines($c, $lines)
 }
 
@@ -369,6 +373,16 @@ Assert ((Get-Decision 'blocked') -notlike '*suppressed=quiet-hours*') "outside t
 Set-Conf 'QUIET_HOURS' 'not-a-window'
 Assert ((Get-Decision 'blocked') -notlike '*suppressed=quiet-hours*') "an unparseable window is ignored"
 Set-Conf 'QUIET_HOURS' ''
+
+Write-Host "  (a temporary mute expires by itself)"
+$future = [int][double]::Parse((Get-Date -UFormat %s)) + 3600
+Set-Conf 'MUTE_UNTIL' "$future"
+Assert ((Get-Decision 'blocked') -like '*suppressed=quiet-until*') "a future MUTE_UNTIL silences everything"
+Set-Conf 'MUTE_UNTIL' '1'
+Assert ((Get-Decision 'blocked') -notlike '*suppressed=quiet-until*') "an expired MUTE_UNTIL is ignored"
+Set-Conf 'MUTE_UNTIL' 'not-a-time'
+Assert ((Get-Decision 'blocked') -notlike '*suppressed=quiet-until*') "an unparseable MUTE_UNTIL is ignored"
+Set-Conf 'MUTE_UNTIL' ''
 
 Write-Host "  (a per-event sound file overrides the built-in choice)"
 $custom = Join-Path $h 'custom.wav'

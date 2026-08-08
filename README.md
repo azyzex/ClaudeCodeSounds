@@ -116,6 +116,7 @@ Or edit the file directly. The notifier re-reads it on every alert, so changes t
 | `ALWAYS_ALERT` | `blocked,limit,error` | Kinds that ignore `MIN_SECONDS` and the focus check, because you want to know regardless. |
 | `MUTE` | empty | Kinds to silence completely. |
 | `QUIET_HOURS` | empty | Silence everything inside a window, for example `23:00-08:00`. Windows that wrap past midnight work. |
+| `MUTE_UNTIL` | empty | Silence everything until this epoch second, then expire. What the tray's "quiet for an hour" writes. |
 | `SOUND_PACK` | `default` | Which pack to use. See below. |
 
 ### Per-event settings
@@ -209,6 +210,11 @@ A small configurator for everything below: toggle each alert, pick a sound and
 hear it, set volumes and rhythms, and see recent activity including the alerts
 it deliberately stayed quiet for. It can install and remove the hooks itself, so
 a machine that has never run the scripts needs no terminal.
+
+It also sits in the tray, so the two things you reach for in a hurry, silencing
+the alerts and opening the settings, do not need the window open. A temporary
+mute is written as an expiry time rather than a flag, so one you forget about
+turns itself back on.
 
 Downloads are per platform, on the [releases page](https://github.com/azyzex/ClaudeCodeSounds/releases):
 `.msi` for Windows, and `.AppImage` or `.deb` for Linux. A macOS build is not

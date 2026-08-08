@@ -23,6 +23,8 @@ struct AppState {
     sounds: Vec<String>,
     conf_path: String,
     platform: &'static str,
+    /// Epoch second a temporary mute expires, if one is running.
+    muted_until: Option<u64>,
 }
 
 fn is_unix() -> bool {
@@ -65,6 +67,7 @@ fn load_state() -> Result<AppState, String> {
             .map(|p| p.display().to_string())
             .unwrap_or_default(),
         platform: if is_unix() { "unix" } else { "windows" },
+        muted_until: muted_until(),
     })
 }
 
@@ -330,13 +333,111 @@ fn timestamp() -> String {
     format!("{}", secs)
 }
 
+/// Silence every alert until `minutes` from now, or clear it with 0.
+///
+/// Written as an absolute time rather than a flag, so a mute you forget about
+/// expires on its own instead of leaving you wondering why the alerts stopped.
+#[tauri::command]
+fn quiet_for(minutes: u64) -> Result<String, String> {
+    let mut changes = BTreeMap::new();
+    if minutes == 0 {
+        changes.insert("MUTE_UNTIL".to_string(), String::new());
+    } else {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        changes.insert("MUTE_UNTIL".to_string(), (now + minutes * 60).to_string());
+    }
+    save_settings(changes)?;
+    Ok(if minutes == 0 {
+        "Alerts back on".to_string()
+    } else {
+        format!("Quiet for {} minutes", minutes)
+    })
+}
+
+/// Whether a temporary mute is currently in effect.
+fn muted_until() -> Option<u64> {
+    let text = read_conf_text();
+    let value = config::effective(&text).get("MUTE_UNTIL")?.clone();
+    let until: u64 = value.parse().ok()?;
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    if until > now {
+        Some(until)
+    } else {
+        None
+    }
+}
+
+/// A tray icon, so the two things people reach for in a hurry, quieting the
+/// alerts and opening the settings, do not need the window to be open.
+fn build_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
+    use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
+    use tauri::tray::TrayIconBuilder;
+    use tauri::Manager;
+
+    let open = MenuItem::with_id(app, "open", "Open settings", true, None::<&str>)?;
+    let q30 = MenuItem::with_id(app, "q30", "Quiet for 30 minutes", true, None::<&str>)?;
+    let q60 = MenuItem::with_id(app, "q60", "Quiet for an hour", true, None::<&str>)?;
+    let unmute = MenuItem::with_id(app, "unmute", "Turn alerts back on", true, None::<&str>)?;
+    let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
+    let sep = PredefinedMenuItem::separator(app)?;
+
+    let menu = Menu::with_items(app, &[&open, &sep, &q30, &q60, &unmute, &sep, &quit])?;
+
+    TrayIconBuilder::with_id("main")
+        .icon(
+            app.default_window_icon()
+                .cloned()
+                .ok_or_else(|| tauri::Error::AssetNotFound("the window icon is missing".into()))?,
+        )
+        .tooltip("Claude Code Sounds")
+        .menu(&menu)
+        // Left click opens the window; the menu is the right click.
+        .show_menu_on_left_click(false)
+        .on_menu_event(|app, event| {
+            let show = || {
+                if let Some(w) = app.get_webview_window("main") {
+                    let _ = w.show();
+                    let _ = w.unminimize();
+                    let _ = w.set_focus();
+                }
+            };
+            match event.id().as_ref() {
+                "open" => show(),
+                "q30" => {
+                    let _ = quiet_for(30);
+                }
+                "q60" => {
+                    let _ = quiet_for(60);
+                }
+                "unmute" => {
+                    let _ = quiet_for(0);
+                }
+                "quit" => app.exit(0),
+                _ => {}
+            }
+        })
+        .build(app)?;
+    Ok(())
+}
+
 fn main() {
     tauri::Builder::default()
+        .setup(|app| {
+            build_tray(app.handle())?;
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             load_state,
             save_settings,
             preview,
             recent_log,
+            quiet_for,
             set_hooks
         ])
         .run(tauri::generate_context!())

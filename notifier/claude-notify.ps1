@@ -36,6 +36,7 @@ $opt = @{
     ALWAYS_ALERT          = 'blocked,limit,error'
     MUTE                  = ''
     QUIET_HOURS           = ''
+    MUTE_UNTIL            = ''
     SOUND_PACK            = 'default'
 
     # Per-event, keyed by the uppercased kind. Flat keys rather than sections,
@@ -144,6 +145,18 @@ if ($Kind -eq 'mark') {
 if (-not $force -and ((Test-InList $Kind $opt['MUTE']) -or $evEnabled -eq '0')) {
     Write-Decision "kind=$Kind suppressed=muted"
     exit 0
+}
+
+# --- temporarily muted? -------------------------------------------------------
+# MUTE_UNTIL is an epoch second. The app's "quiet for an hour" writes one, and it
+# expires by itself, so a mute you forget about cannot silence things
+# permanently the way a plain flag would.
+if (-not $force -and $opt['MUTE_UNTIL'] -match '^\d+$') {
+    $nowEpoch = [int][double]::Parse((Get-Date -UFormat %s))
+    if ($nowEpoch -lt [int64]$opt['MUTE_UNTIL']) {
+        Write-Decision "kind=$Kind suppressed=quiet-until until=$($opt['MUTE_UNTIL'])"
+        exit 0
+    }
 }
 
 # --- quiet hours? -------------------------------------------------------------

@@ -216,12 +216,35 @@ function bindGeneral() {
     el.addEventListener('change', () => scheduleSave({ [id]: el.value.trim() }));
   }
 
+  for (const b of document.querySelectorAll('.quiet-buttons button')) {
+    b.addEventListener('click', async () => {
+      try {
+        status(await invoke('quiet_for', { minutes: Number(b.dataset.minutes) }), 'ok');
+        await load();
+      } catch (e) {
+        status(String(e), 'err');
+      }
+    });
+  }
+
   $('SOUND_PACK').addEventListener('change', async (e) => {
     scheduleSave({ SOUND_PACK: e.target.value });
     clearTimeout(saveTimer);
     await flushSave();
     await load();          // the sound lists belong to the pack, so redraw them
   });
+}
+
+function fillQuietNow() {
+  const el = $('quietstate');
+  if (!state.muted_until) {
+    el.textContent = 'Not muted.';
+    el.className = 'hint';
+    return;
+  }
+  const mins = Math.max(1, Math.round((state.muted_until - Date.now() / 1000) / 60));
+  el.textContent = 'Muted for another ' + mins + ' minute' + (mins === 1 ? '' : 's') + '.';
+  el.className = 'hint on';
 }
 
 function fillGeneral() {
@@ -332,6 +355,7 @@ async function load() {
   renderEvents();
   bindGeneral();
   fillGeneral();
+  fillQuietNow();
   await renderLog();
 }
 

@@ -77,6 +77,7 @@ DEBOUNCE_SECONDS=2
 ALWAYS_ALERT="blocked,limit,error"
 MUTE=""
 QUIET_HOURS=""
+MUTE_UNTIL=""
 SOUND_PACK="default"
 DONE_VOLUME=70
 BLOCKED_VOLUME=100
@@ -94,7 +95,7 @@ conf_get() {
 load_conf() {
   [ -f "$CONF_FILE" ] || return 0
   for key in MIN_SECONDS SUPPRESS_WHEN_FOCUSED PROJECT_PITCH SPEAK \
-             TOAST_ON_DONE DEBOUNCE_SECONDS ALWAYS_ALERT MUTE QUIET_HOURS SOUND_PACK \
+             TOAST_ON_DONE DEBOUNCE_SECONDS ALWAYS_ALERT MUTE QUIET_HOURS MUTE_UNTIL SOUND_PACK \
              DONE_VOLUME BLOCKED_VOLUME LIMIT_VOLUME ERROR_VOLUME; do
     v=$(conf_get "$key")
     # An explicit if, not `[ -n "$v" ] && eval ...`: MUTE is empty by default and
@@ -202,6 +203,10 @@ QUIET_HOURS=$QUIET_HOURS
 # so adding your own means dropping a folder of .wav files in beside "default"
 # and naming it here.
 SOUND_PACK=$SOUND_PACK
+
+# Silence everything until this epoch second. The desktop app's "quiet for an
+# hour" writes it; it expires by itself. Leave empty for no temporary mute.
+MUTE_UNTIL=$MUTE_UNTIL
 
 # ---------------------------------------------------------------------------
 # Per-event settings. One group per alert kind.

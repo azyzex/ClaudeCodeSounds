@@ -25,6 +25,7 @@ pub const DEFAULTS: &[(&str, &str)] = &[
     ("ALWAYS_ALERT", "blocked,limit,error"),
     ("MUTE", ""),
     ("QUIET_HOURS", ""),
+    ("MUTE_UNTIL", ""),
     ("SOUND_PACK", "default"),
     ("DONE_ENABLED", "1"),
     ("DONE_VOLUME", "70"),

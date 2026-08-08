@@ -171,3 +171,7 @@ footer { max-width: 720px; margin: 18px auto 0; }
 .log-kind { font-weight: 600; }
 .log-outcome { color: var(--muted); }
 .log-row.played .log-outcome { color: var(--ok); }
+
+.quiet-buttons { grid-column: 2; grid-row: 1 / span 2; display: flex; gap: 6px; }
+.quiet-buttons button { padding: 5px 10px; font-size: 13px; }
+#quietstate.on { color: var(--accent); font-weight: 500; }
