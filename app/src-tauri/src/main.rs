@@ -6,7 +6,7 @@ mod hooks;
 
 use serde::Serialize;
 use std::collections::BTreeMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 /// Everything the UI needs to draw itself, fetched in one call so the window
@@ -141,11 +141,81 @@ fn debounce_stamp() -> Option<PathBuf> {
     }
 }
 
+/// Copy the notifier and the bundled sounds out of the app into ~/.claude.
+///
+/// This is what lets the app set up a machine that has never run the shell
+/// installer, which is most of the reason for having an app at all. The files
+/// are the very ones the installers embed, shipped as Tauri resources, so both
+/// front doors put the same thing on disk.
+fn write_payload(app: &tauri::AppHandle, dir: &Path) -> Result<(), String> {
+    use tauri::Manager;
+
+    let res = app
+        .path()
+        .resource_dir()
+        .map_err(|e| format!("could not find the bundled files: {}", e))?;
+
+    let notifier = if is_unix() {
+        "claude-notify.sh"
+    } else {
+        "claude-notify.ps1"
+    };
+    let src = res.join("notifier").join(notifier);
+    let dst = dir.join(notifier);
+    std::fs::copy(&src, &dst).map_err(|e| format!("could not write {}: {}", dst.display(), e))?;
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&dst, std::fs::Permissions::from_mode(0o755));
+    }
+
+    // Sounds are only ever added, never replaced: someone may have edited or
+    // replaced a file in the default pack and an install should not undo that.
+    let sound_src = res.join("sounds").join("default");
+    let sound_dst = dir.join("claude-sounds").join("default");
+    std::fs::create_dir_all(&sound_dst).map_err(|e| e.to_string())?;
+    if let Ok(entries) = std::fs::read_dir(&sound_src) {
+        for entry in entries.flatten() {
+            let from = entry.path();
+            if from.extension().and_then(|e| e.to_str()) != Some("wav") {
+                continue;
+            }
+            let to = sound_dst.join(entry.file_name());
+            if !to.exists() {
+                let _ = std::fs::copy(&from, &to);
+            }
+        }
+    }
+
+    // The config file is created only if absent, so re-installing never
+    // discards options someone has already chosen.
+    let conf = dir.join("claude-notify.conf");
+    if !conf.exists() {
+        let mut text = String::from(
+            "# Claude Code sound alerts - options\n\
+             #\n\
+             # Written by the desktop app. The notifier re-reads this file on every\n\
+             # alert, so changes take effect immediately with no restart.\n\n",
+        );
+        for (k, v) in config::DEFAULTS {
+            text.push_str(&format!("{}={}\n", k, v));
+        }
+        std::fs::write(&conf, text).map_err(|e| e.to_string())?;
+    }
+
+    Ok(())
+}
+
 #[tauri::command]
-fn set_hooks(install: bool) -> Result<usize, String> {
+fn set_hooks(app: tauri::AppHandle, install: bool) -> Result<usize, String> {
     let dir = config::claude_dir().ok_or("could not work out your home directory")?;
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     let path = hooks::settings_path(&dir);
+
+    if install {
+        write_payload(&app, &dir)?;
+    }
 
     let mut settings: serde_json::Value = match std::fs::read_to_string(&path) {
         Ok(text) if !text.trim().is_empty() => serde_json::from_str(&text).map_err(|e| {

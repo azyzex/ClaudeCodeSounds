@@ -23,13 +23,13 @@ the app has a sound picker, so the set of sounds has to be known and consistent
 first, or the picker just lists whatever each machine happens to have and cannot
 preview reliably.
 
-## Phase 0 — Single source of truth (done)
+## Phase 0 â€” Single source of truth (done)
 
 Notifiers extracted to `notifier/`, installers generated from `templates/` by
 `build/generate.py`, CI fails on drift. The app can now ship the same notifier
 the scripts use rather than a second copy.
 
-## Phase 1 — v1.2.0, scripts only
+## Phase 1 â€” v1.2.0, scripts only
 
 Everything the app will need to configure.
 
@@ -37,8 +37,8 @@ Everything the app will need to configure.
 - [x] Rhythm patterns (`3x140`)
 - [x] Quiet hours
 - [x] `CLAUDE_NOTIFY_DRYRUN=1`, which the app also needs for previewing
-- [x] **Bundled sounds** — nine synthesised sounds, embedded as base64
-- [x] **Sound packs** — a pack is a folder, so people can make their own
+- [x] **Bundled sounds** â€” nine synthesised sounds, embedded as base64
+- [x] **Sound packs** â€” a pack is a folder, so people can make their own
 - [x] Docs and a v1.2.0 release
 
 **Bundled sounds is a decision, not a question.** It ships, and it ships before
@@ -55,7 +55,7 @@ they are reproducible and carry no licensing question.
 **Exit criteria:** every alert kind resolves to a bundled sound on a machine with
 no system sounds at all, CI asserts it, and the scripts are feature-complete.
 
-## Phase 2 — app v0.1, the window
+## Phase 2 â€” app v0.1, the window
 
 - [x] Scaffold: Tauri v2, generated icons, CI building and testing on Linux
       and Windows
@@ -66,20 +66,20 @@ no system sounds at all, CI asserts it, and the scripts are feature-complete.
 - [x] Install and uninstall the hooks from the app, using the same merge,
       backup and idempotency rules as the scripts
 - [x] Detect an existing script install rather than fighting it
-- [ ] Bundle the scripts and sounds as resources, and write them out on install
+- [x] Bundle the scripts and sounds as resources, and write them out on install
 - [ ] Recent alert log: what fired, what was suppressed and why
-- [ ] Run it, look at it, fix what looks wrong
+- [x] Run it, look at it, fix what looks wrong
 - [ ] Release workflow producing per-platform installers
 
 **Exit criteria:** a fresh machine with no terminal use gets working alerts, and
 uninstalling the app leaves them working.
 
-## Phase 3 — app v0.2, the tray
+## Phase 3 â€” app v0.2, the tray
 
 - Quick mute and "quiet for 1 hour"
 - Quiet hours UI over the Phase 1 config
 - Live status and a running alert feed
-- **Escalation** — re-alert if a blocked prompt goes unanswered. The only
+- **Escalation** â€” re-alert if a blocked prompt goes unanswered. The only
   feature that genuinely needs a resident process, since a hook exits at once.
 - Launch at login, opt in
 
@@ -98,5 +98,5 @@ uninstalling the app leaves them working.
 
 - **Remote push** to a phone via ntfy.sh. Genuinely useful for long runs, free,
   but it is a Phase 3 concern at the earliest.
-- **More hook events** — `PreCompact` is the interesting one. Cheap to add once
+- **More hook events** â€” `PreCompact` is the interesting one. Cheap to add once
   the config shape has settled.
