@@ -114,6 +114,14 @@ def render(template_path, placeholder, notifier_path):
                     'end the embedded block early' % i
                 )
         out = out.replace('@@STATUSLINE@@', sl)
+    if '@@STATUSLINE_PS1@@' in out:
+        sl = read('statusline/claude-sounds-statusline.ps1').replace('\r\n', '\n').rstrip('\n')
+        for i, line in enumerate(sl.split('\n'), 1):
+            if line.startswith("'@"):
+                raise SystemExit(
+                    'statusline ps1 line %d starts with a here-string terminator' % i
+                )
+        out = out.replace('@@STATUSLINE_PS1@@', sl)
     if '@@SOUNDS@@' in out:
         out = out.replace('@@SOUNDS@@', sound_blob())
     return out.replace('\r\n', '\n')

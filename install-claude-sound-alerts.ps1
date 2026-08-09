@@ -44,6 +44,7 @@ $claudeDir    = Join-Path $env:USERPROFILE '.claude'
 $notifyScript = Join-Path $claudeDir 'claude-notify.ps1'
 $confFile     = Join-Path $claudeDir 'claude-notify.conf'
 $soundDir     = Join-Path $claudeDir 'claude-sounds'
+$statusLineScript = Join-Path $claudeDir 'claude-sounds-statusline.ps1'
 $settingsPath = Join-Path $claudeDir 'settings.json'
 $marker       = 'claude-notify.ps1'   # how we recognise our own hook entries
 
@@ -131,7 +132,7 @@ $opt = [ordered]@{
     SPEAK                 = '0'
     TOAST_ON_DONE         = '0'
     DEBOUNCE_SECONDS      = '2'
-    ALWAYS_ALERT          = 'blocked,limit,error'
+    ALWAYS_ALERT          = 'blocked,limit,error,limit-reset,weekly-reset'
     MUTE                  = ''
     QUIET_HOURS           = ''
     MUTE_UNTIL            = ''
@@ -312,6 +313,24 @@ ERROR_ENABLED=1
 ERROR_VOLUME=$($opt['ERROR_VOLUME'])
 ERROR_PATTERN=2
 ERROR_SOUND=
+
+# Only a fallback. The status line records the real reset time straight from
+# Claude Code, and that always wins. This is how far ahead to guess if you hit
+# the limit before the status line ever ran.
+WINDOW_HOURS=5
+
+# Your five hour limit resetting, so you know you can work again.
+LIMIT_RESET_ENABLED=1
+LIMIT_RESET_VOLUME=100
+LIMIT_RESET_PATTERN=2x180
+LIMIT_RESET_SOUND=
+
+# The seven day limit resetting. Rare, so it is on: about once a week, and
+# genuinely worth knowing.
+WEEKLY_RESET_ENABLED=1
+WEEKLY_RESET_VOLUME=70
+WEEKLY_RESET_PATTERN=1
+WEEKLY_RESET_SOUND=
 "@
     [System.IO.File]::WriteAllText($confFile, $text + "`n", (New-Object System.Text.UTF8Encoding($false)))
 }
@@ -397,7 +416,20 @@ if ($Uninstall) {
     if ($hooks.Count -eq 0) { $settings.Remove('hooks') }
     Save-Json -Data $settings -Path $settingsPath
     if (Test-Path $notifyScript) { Remove-Item $notifyScript -Force }
+    if (Test-Path $statusLineScript) { Remove-Item $statusLineScript -Force }
+    foreach ($leftover in @('claude-limits.json', 'claude-reset-fired',
+                            'claude-limit-reset', 'claude-watch-alive',
+                            'claude-notify-pending')) {
+        $lp = Join-Path $claudeDir $leftover
+        if (Test-Path $lp) { Remove-Item $lp -Force -ErrorAction SilentlyContinue }
+    }
     if (Test-Path $soundDir) { Remove-Item $soundDir -Recurse -Force }
+
+    # Only unregister the status line if it is still ours.
+    $sl = $settings['statusLine']
+    if ($sl -is [hashtable] -and "$($sl['command'])" -like '*claude-sounds-statusline*') {
+        $settings.Remove('statusLine')
+    }
     Write-Ok "removed. restart Claude Code."
     Write-Dim "left claude-notify.conf in place, in case you reinstall"
     Write-Host ""
@@ -415,8 +447,36 @@ foreach ($evt in @($hooks.Keys)) {
     if (@($hooks[$evt]).Count -eq 0) { $hooks.Remove($evt) }
 }
 
+# Registering the status line is the one change here visible in your terminal,
+# and people configure their own. So it is only set when there is none: an
+# existing one is left completely alone.
+$existingSl = $settings['statusLine']
+if ($existingSl -is [hashtable] -and $existingSl['command']) {
+    if ("$($existingSl['command'])" -like '*claude-sounds-statusline*') {
+        $slState = 'same'
+    } else {
+        $slState = 'other'
+    }
+} else {
+    $settings['statusLine'] = @{
+        type    = 'command'
+        command = ('powershell.exe -NoProfile -ExecutionPolicy Bypass -File "{0}"' -f $statusLineScript)
+        padding = 0
+    }
+    $slState = 'added'
+}
+
 Save-Json -Data $settings -Path $settingsPath
 Write-Ok "wired 5 hooks into settings.json"
+switch ($slState) {
+    'added' { Write-Ok "registered the status line" }
+    'same'  { Write-Step "status line already points here" }
+    'other' {
+        Write-Step "you already have a status line, so it was left alone"
+        Write-Dim "the reset alerts need it, so call this from your own script:"
+        Write-Dim "  powershell -NoProfile -File `"$statusLineScript`" > `$null"
+    }
+}
 
 # ------------------------------------------------------- the notifier script ---
 
@@ -435,7 +495,8 @@ $notifyBody = @'
   so edits take effect immediately. Set CLAUDE_NOTIFY_DEBUG=1 to print the
   decision instead of staying silent.
 #>
-param([ValidateSet('mark','done','blocked','limit','error')][string]$Kind = 'done')
+param([ValidateSet('mark','done','blocked','limit','error','limit-reset','weekly-reset','watch')]
+      [string]$Kind = 'done')
 
 $ErrorActionPreference = 'SilentlyContinue'
 
@@ -456,7 +517,7 @@ $opt = @{
     SPEAK                 = '0'
     TOAST_ON_DONE         = '0'
     DEBOUNCE_SECONDS      = '2'
-    ALWAYS_ALERT          = 'blocked,limit,error'
+    ALWAYS_ALERT          = 'blocked,limit,error,limit-reset,weekly-reset'
     MUTE                  = ''
     QUIET_HOURS           = ''
     MUTE_UNTIL            = ''
@@ -464,6 +525,9 @@ $opt = @{
     NTFY_SERVER           = 'https://ntfy.sh'
     NTFY_ALERTS           = 'blocked,limit,error'
     RESPECT_DND           = '1'
+    WINDOW_HOURS          = '5'
+    LIMIT_RESET_ENABLED   = '1'; LIMIT_RESET_VOLUME  = '100'; LIMIT_RESET_PATTERN  = '2x180'; LIMIT_RESET_SOUND  = ''
+    WEEKLY_RESET_ENABLED  = '1'; WEEKLY_RESET_VOLUME = '70';  WEEKLY_RESET_PATTERN = '1';     WEEKLY_RESET_SOUND = ''
     SOUND_PACK            = 'default'
 
     # Per-event, keyed by the uppercased kind. Flat keys rather than sections,
@@ -482,7 +546,7 @@ if (Test-Path $confFile) {
 }
 
 # Resolve the per-event options for this kind.
-$ev        = $Kind.ToUpperInvariant()
+$ev        = $Kind.ToUpperInvariant().Replace('-', '_')
 $evEnabled = $opt["${ev}_ENABLED"]
 $evSound   = $opt["${ev}_SOUND"]
 $evVolume  = 100
@@ -538,6 +602,115 @@ function Write-Decision {
     if ($debug) { Write-Output $Text }
 }
 
+# --- waiting for a reset ------------------------------------------------------
+# Claude Code hands the status line the real figures, straight from Anthropic.
+# The status line script saves them; this watches the clock and alerts when a
+# reset time passes. A hook cannot do that itself, because it exits as soon as
+# it finishes, so the notifier starts a copy of itself in the background.
+$limitsFile = Join-Path $env:USERPROFILE '.claude\claude-limits.json'
+$firedFile  = Join-Path $env:USERPROFILE '.claude\claude-reset-fired'
+$aliveFile  = Join-Path $env:USERPROFILE '.claude\claude-watch-alive'
+$estFile    = Join-Path $env:USERPROFILE '.claude\claude-limit-reset'
+
+function Get-Limit {
+    param([string]$Key)
+    if (-not (Test-Path $limitsFile)) { return '' }
+    foreach ($line in (Get-Content $limitsFile)) {
+        if ($line -match "^$Key=(.*)$") { return $matches[1].Trim() }
+    }
+    return ''
+}
+
+function Test-AlreadyFired {
+    param([string]$Window, [string]$Stamp)
+    if (-not (Test-Path $firedFile)) { return $false }
+    return ((Get-Content $firedFile) -contains "$Window=$Stamp")
+}
+
+function Set-Fired {
+    param([string]$Window, [string]$Stamp)
+    $keep = @()
+    if (Test-Path $firedFile) {
+        $keep = @(Get-Content $firedFile | Where-Object { $_ -notmatch "^$Window=" })
+    }
+    $keep += "$Window=$Stamp"
+    [System.IO.File]::WriteAllLines($firedFile, $keep)
+}
+
+function Start-Watcher {
+    if ($env:CLAUDE_NOTIFY_DRYRUN -eq '1') { return }
+    if (Test-Path $aliveFile) {
+        $last = (Get-Content $aliveFile -Raw).Trim()
+        if ($last -match '^\d+$') {
+            $now = [int][double]::Parse((Get-Date -UFormat %s))
+            if (($now - [int]$last) -lt 150) { return }
+        }
+    }
+    Start-Process powershell.exe -WindowStyle Hidden -ArgumentList @(
+        '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $PSCommandPath, '-Kind', 'watch'
+    )
+}
+
+if ($Kind -eq 'watch') {
+    # Wakes once a minute rather than sleeping until the target: a machine that
+    # suspends would make a long sleep fire late by however long it was asleep,
+    # whereas comparing against an absolute time self-corrects on wake.
+    while ($true) {
+        [System.IO.File]::WriteAllText($aliveFile, [string][int][double]::Parse((Get-Date -UFormat %s)))
+        $now = [int][double]::Parse((Get-Date -UFormat %s))
+        $pending = $false
+        $firedThisTick = $false
+
+        $five = Get-Limit 'five_hour_resets_at'
+        if ($five -match '^\d+$') {
+            if ($now -ge [int64]$five) {
+                if (-not (Test-AlreadyFired 'five_hour' $five)) {
+                    Set-Fired 'five_hour' $five
+                    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $PSCommandPath -Kind limit-reset *> $null
+                    $firedThisTick = $true
+                }
+            } else { $pending = $true }
+        }
+
+        # Both windows can come due in the same tick, and the debounce exists to
+        # stop a stutter of identical alerts rather than to hide a different
+        # one, so the second is given room.
+        if ($firedThisTick) { Start-Sleep -Seconds ((Get-IntOpt 'DEBOUNCE_SECONDS' 2) + 1) }
+
+        $week = Get-Limit 'seven_day_resets_at'
+        if ($week -match '^\d+$') {
+            if ($now -ge [int64]$week) {
+                if (-not (Test-AlreadyFired 'seven_day' $week)) {
+                    Set-Fired 'seven_day' $week
+                    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $PSCommandPath -Kind weekly-reset *> $null
+                }
+            } else { $pending = $true }
+        }
+
+        # The estimate, used only when hitting the limit produced no real
+        # figure. Dropped as soon as the status line supplies one.
+        if (Test-Path $estFile) {
+            if ($five) {
+                Remove-Item $estFile -Force -ErrorAction SilentlyContinue
+            } else {
+                $target = ((Get-Content $estFile -Raw) -split '\|')[0].Trim()
+                if ($target -match '^\d+$' -and $now -ge [int64]$target) {
+                    Remove-Item $estFile -Force -ErrorAction SilentlyContinue
+                    $env:CLAUDE_NOTIFY_ESTIMATED = 'estimated'
+                    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $PSCommandPath -Kind limit-reset *> $null
+                    $env:CLAUDE_NOTIFY_ESTIMATED = $null
+                } elseif ($target -match '^\d+$') { $pending = $true }
+                else { Remove-Item $estFile -Force -ErrorAction SilentlyContinue }
+            }
+        }
+
+        if (-not $pending) { break }
+        Start-Sleep -Seconds 60
+    }
+    Remove-Item $aliveFile -Force -ErrorAction SilentlyContinue
+    exit 0
+}
+
 # --- read the hook payload ----------------------------------------------------
 # Claude Code sends the event JSON on stdin. Every event carries session_id and
 # cwd; Notification carries message.
@@ -575,8 +748,34 @@ $startFile   = Join-Path $env:TEMP "claude-notify-start.$safeSession"
 # This is the whole job of the UserPromptSubmit hook. No sound, no popup.
 if ($Kind -eq 'mark') {
     try { [System.IO.File]::WriteAllText($startFile, [string][int][double]::Parse((Get-Date -UFormat %s))) } catch { }
+    # Nothing to schedule: the status line records the real reset times. This
+    # only makes sure something is watching them, since the watcher exits once
+    # nothing is pending.
+    if ((Get-Limit 'five_hour_resets_at') -or (Get-Limit 'seven_day_resets_at')) { Start-Watcher }
     Write-Decision "kind=mark session=$session"
     exit 0
+}
+
+# --- schedule the limit reset -------------------------------------------------
+# Only a fallback, for hitting the limit before the status line has ever run. A
+# real reset time always wins over this guess, and the wording says which it is.
+if ($Kind -eq 'limit' -and $env:CLAUDE_NOTIFY_DRYRUN -ne '1') {
+    try {
+        if (-not (Get-Limit 'five_hour_resets_at')) {
+            $already = $false
+            if (Test-Path $estFile) {
+                $t = ((Get-Content $estFile -Raw) -split '\|')[0].Trim()
+                $now = [int][double]::Parse((Get-Date -UFormat %s))
+                if ($t -match '^\d+$' -and $now -lt [int64]$t) { $already = $true }
+            }
+            if (-not $already) {
+                $hours = Get-IntOpt 'WINDOW_HOURS' 5
+                $at = [int][double]::Parse((Get-Date -UFormat %s)) + $hours * 3600
+                [System.IO.File]::WriteAllText($estFile, "$at|estimated")
+            }
+        }
+        Start-Watcher
+    } catch { }
 }
 
 # --- muted? -------------------------------------------------------------------
@@ -710,6 +909,22 @@ switch ($Kind) {
         $title    = 'Claude needs you'
         $fallback = 'Waiting on your input or a permission prompt'
         $icon     = 'Warning'; $freq = 740
+    }
+    'limit-reset' {
+        $bundled  = @('chime-bright','chime-high')
+        $wavs     = @('Windows Notify System Generic.wav','Windows Ding.wav','chimes.wav')
+        $title    = 'Claude is available again'
+        $fallback = if ($env:CLAUDE_NOTIFY_ESTIMATED -eq 'estimated') {
+            'About five hours have passed. Your limit has probably reset.'
+        } else { 'Your usage limit has reset.' }
+        $icon     = 'Info'; $freq = 1046
+    }
+    'weekly-reset' {
+        $bundled  = @('chime-mid','chime-soft')
+        $wavs     = @('Windows Notify.wav','Windows Ding.wav','chimes.wav')
+        $title    = 'Weekly limit reset'
+        $fallback = 'Your seven day limit has reset.'
+        $icon     = 'Info'; $freq = 880
     }
     'limit' {
         $bundled  = @('alert-limit')
@@ -928,6 +1143,125 @@ exit 0
 
 Set-Content -Path $notifyScript -Value $notifyBody -Encoding utf8
 Write-Ok "wrote claude-notify.ps1"
+
+# --------------------------------------------------------- the status line ---
+# This is what makes the reset alerts possible. Claude Code hands the status
+# line the real figures from Anthropic, including when your five hour and seven
+# day limits reset, and drawing that bar costs nothing because it happens
+# anyway. The script saves those times so the notifier can alert when they pass.
+$statusLineBody = @'
+#requires -version 5
+<#
+  Claude Code sound alerts - status line (Windows)
+
+  Claude Code runs this to draw the bar at the bottom of the terminal, handing
+  it session data on stdin. That data includes the one thing this project could
+  not otherwise know:
+
+      "rate_limits": {
+        "five_hour": { "used_percentage": 23.5, "resets_at": 1738425600 },
+        "seven_day": { "used_percentage": 41.2, "resets_at": 1738857600 }
+      }
+
+  Those numbers come from Anthropic, so they already account for every surface
+  you use: this terminal, the web, the phone, another machine. Reading them
+  costs nothing, because Claude Code draws this bar regardless.
+
+  So this script does two jobs:
+
+    1. print a status line, which is what Claude Code asked for
+    2. save the reset times, so the notifier can alert when they pass
+
+  It must stay quick and it must never fail loudly: it runs constantly, and a
+  broken status line is a broken looking editor.
+#>
+
+$ErrorActionPreference = 'SilentlyContinue'
+
+$claudeDir = Join-Path $env:USERPROFILE '.claude'
+$limits    = Join-Path $claudeDir 'claude-limits.json'
+$notifier  = Join-Path $claudeDir 'claude-notify.ps1'
+
+$payload = [Console]::In.ReadToEnd()
+if (-not $payload) { exit 0 }
+
+# Pulled out with a regex rather than ConvertFrom-Json on purpose. This runs on
+# every redraw, and the shape here is flat and known, so the cheaper route is
+# the right one. Anything unexpected simply yields nothing.
+function Get-Field {
+    param([string]$Window, [string]$Key)
+    if ($payload -match "`"$Window`"\s*:\s*\{[^}]*`"$Key`"\s*:\s*([0-9.]+)") {
+        return $matches[1]
+    }
+    return ''
+}
+
+$fivePct = Get-Field 'five_hour' 'used_percentage'
+$fiveAt  = Get-Field 'five_hour' 'resets_at'
+$weekPct = Get-Field 'seven_day' 'used_percentage'
+$weekAt  = Get-Field 'seven_day' 'resets_at'
+
+# --- save what was learned ----------------------------------------------------
+# Written whenever a reset time is present, so the notifier has something to
+# watch even after Claude Code closes. Plain key=value, for the same reason the
+# config is: anything can read it without a parser.
+if ($fiveAt -and (Test-Path $claudeDir)) {
+    try {
+        $lines = @(
+            "updated=$([int][double]::Parse((Get-Date -UFormat %s)))",
+            "five_hour_resets_at=$fiveAt"
+        )
+        if ($fivePct) { $lines += "five_hour_used=$fivePct" }
+        if ($weekAt)  { $lines += "seven_day_resets_at=$weekAt" }
+        if ($weekPct) { $lines += "seven_day_used=$weekPct" }
+        [System.IO.File]::WriteAllLines($limits, $lines)
+    } catch { }
+
+    # Make sure something is watching the clock. The notifier's watcher exits
+    # once nothing is pending, so it needs starting again when a reset appears.
+    try {
+        $alive = Join-Path $claudeDir 'claude-watch-alive'
+        $running = $false
+        if (Test-Path $alive) {
+            $last = (Get-Content $alive -Raw).Trim()
+            if ($last -match '^\d+$') {
+                $now = [int][double]::Parse((Get-Date -UFormat %s))
+                $running = ($now - [int]$last) -lt 150
+            }
+        }
+        if (-not $running -and (Test-Path $notifier)) {
+            Start-Process powershell.exe -WindowStyle Hidden -ArgumentList @(
+                '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $notifier, '-Kind', 'watch'
+            )
+        }
+    } catch { }
+}
+
+# --- draw the bar -------------------------------------------------------------
+# Only installed when there was no status line already, so it has to be useful
+# on its own rather than assuming someone will style it.
+$model = ''
+if ($payload -match '"display_name"\s*:\s*"([^"]*)"') { $model = $matches[1] }
+$dir = ''
+if ($payload -match '"current_dir"\s*:\s*"([^"]*)"') { $dir = Split-Path $matches[1].Replace('\\', '\') -Leaf }
+
+$parts = @()
+if ($model) { $parts += $model }
+if ($dir)   { $parts += $dir }
+
+if ($fivePct -and $fiveAt) {
+    $pct = [int][double]$fivePct
+    $when = ''
+    try {
+        $when = [DateTimeOffset]::FromUnixTimeSeconds([int64]$fiveAt).LocalDateTime.ToString('HH:mm')
+    } catch { }
+    $parts += if ($when) { "$pct% used, resets $when" } else { "$pct% used" }
+}
+
+Write-Output ($parts -join ' - ')
+'@
+Set-Content -Path $statusLineScript -Value $statusLineBody -Encoding utf8
+Write-Ok "wrote claude-sounds-statusline.ps1"
 
 # ------------------------------------------------------------- the sounds ---
 # Written out from the base64 block at the end of this file, so a machine with

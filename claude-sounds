@@ -4,6 +4,7 @@
 # =============================================================================
 #
 #    claude-sounds status     is any of this actually working
+#    claude-sounds limits     how much of your limit is left, and when it resets
 #    claude-sounds stats      how your turns have been going
 #    claude-sounds log        recent alerts, and why some were skipped
 #    claude-sounds test KIND  play one alert now (done, blocked, limit, error)
@@ -21,6 +22,7 @@ NOTIFIER="$CLAUDE_DIR/claude-notify.sh"
 SOUND_DIR="$CLAUDE_DIR/claude-sounds"
 SETTINGS="$CLAUDE_DIR/settings.json"
 LOGFILE="$CLAUDE_DIR/claude-notify.log"
+LIMITS="$CLAUDE_DIR/claude-limits.json"
 
 bold()  { printf '\033[1m%s\033[0m\n' "$1"; }
 ok()    { printf '  \033[32mok\033[0m    %s\n' "$1"; }
@@ -113,6 +115,21 @@ PYEOF
   local topic; topic=$(cfg NTFY_TOPIC "")
   [ -n "$topic" ] && ok "phone push enabled for: $(cfg NTFY_ALERTS 'blocked,limit,error')"
 
+  # The figures Claude Code reports, saved by the status line. These come from
+  # Anthropic, so they cover every surface, not just this terminal.
+  if [ -f "$LIMITS" ]; then
+    local fp fa wp wa
+    fp=$(sed -n 's/^five_hour_used=//p' "$LIMITS" | tail -1)
+    fa=$(sed -n 's/^five_hour_resets_at=//p' "$LIMITS" | tail -1)
+    wp=$(sed -n 's/^seven_day_used=//p' "$LIMITS" | tail -1)
+    wa=$(sed -n 's/^seven_day_resets_at=//p' "$LIMITS" | tail -1)
+    [ -n "$fa" ] && ok "5 hour limit: ${fp:-?}% used, resets $(human_at "$fa")"
+    [ -n "$wa" ] && ok "7 day limit:  ${wp:-?}% used, resets $(human_at "$wa")"
+  else
+    warn "no limit figures yet"
+    dim "they arrive once Claude Code draws its status line; restart it if you have only just installed"
+  fi
+
   if [ -f "$LOGFILE" ]; then
     local last; last=$(tail -n 1 "$LOGFILE" 2>/dev/null | cut -d'|' -f1)
     case "$last" in
@@ -124,6 +141,25 @@ PYEOF
     dim "restart Claude Code if you have only just installed"
   fi
   printf '\n'
+}
+
+# A reset time, said the way a person would: the clock time, plus how long that
+# is from now, because "18:40" alone still needs mental arithmetic.
+human_at() {
+  local at="$1" now left when
+  case "$at" in ''|*[!0-9]*) printf 'unknown'; return ;; esac
+  now=$(date +%s)
+  when=$(date -d "@$at" '+%H:%M' 2>/dev/null || date -r "$at" '+%H:%M' 2>/dev/null)
+  left=$(( at - now ))
+  if [ "$left" -le 0 ]; then
+    printf '%s (already passed)' "${when:-?}"
+  elif [ "$left" -lt 3600 ]; then
+    printf '%s (in %dm)' "${when:-?}" $(( left / 60 ))
+  elif [ "$left" -lt 86400 ]; then
+    printf '%s (in %dh %dm)' "${when:-?}" $(( left / 3600 )) $(( (left % 3600) / 60 ))
+  else
+    printf '%s (in %dd)' "${when:-?}" $(( left / 86400 ))
+  fi
 }
 
 human_ago() {
@@ -249,12 +285,30 @@ set_conf() {
   fi
 }
 
+cmd_limits() {
+  if [ ! -f "$LIMITS" ]; then
+    echo "No limit figures yet. Open Claude Code once so its status line runs."
+    return 0
+  fi
+  bold "Usage limits"
+  local fp fa wp wa
+  fp=$(sed -n 's/^five_hour_used=//p' "$LIMITS" | tail -1)
+  fa=$(sed -n 's/^five_hour_resets_at=//p' "$LIMITS" | tail -1)
+  wp=$(sed -n 's/^seven_day_used=//p' "$LIMITS" | tail -1)
+  wa=$(sed -n 's/^seven_day_resets_at=//p' "$LIMITS" | tail -1)
+  printf '  %-8s %6s%%  resets %s\n' "5 hour" "${fp:-?}" "$(human_at "$fa")"
+  printf '  %-8s %6s%%  resets %s\n' "7 day"  "${wp:-?}" "$(human_at "$wa")"
+  local upd; upd=$(sed -n 's/^updated=//p' "$LIMITS" | tail -1)
+  [ -n "$upd" ] && dim "last seen $(human_ago "$upd")"
+}
+
 usage() {
   sed -n '3,15p' "$0" | sed 's/^#[ ]\{0,2\}//'
 }
 
 case "${1:-status}" in
   status)  cmd_status ;;
+  limits)  cmd_limits ;;
   stats)   cmd_stats ;;
   log)     shift; cmd_log "${1:-15}" ;;
   test)    shift; cmd_test "${1:-blocked}" ;;

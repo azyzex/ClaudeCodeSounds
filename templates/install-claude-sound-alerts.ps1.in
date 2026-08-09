@@ -44,6 +44,7 @@ $claudeDir    = Join-Path $env:USERPROFILE '.claude'
 $notifyScript = Join-Path $claudeDir 'claude-notify.ps1'
 $confFile     = Join-Path $claudeDir 'claude-notify.conf'
 $soundDir     = Join-Path $claudeDir 'claude-sounds'
+$statusLineScript = Join-Path $claudeDir 'claude-sounds-statusline.ps1'
 $settingsPath = Join-Path $claudeDir 'settings.json'
 $marker       = 'claude-notify.ps1'   # how we recognise our own hook entries
 
@@ -131,7 +132,7 @@ $opt = [ordered]@{
     SPEAK                 = '0'
     TOAST_ON_DONE         = '0'
     DEBOUNCE_SECONDS      = '2'
-    ALWAYS_ALERT          = 'blocked,limit,error'
+    ALWAYS_ALERT          = 'blocked,limit,error,limit-reset,weekly-reset'
     MUTE                  = ''
     QUIET_HOURS           = ''
     MUTE_UNTIL            = ''
@@ -312,6 +313,24 @@ ERROR_ENABLED=1
 ERROR_VOLUME=$($opt['ERROR_VOLUME'])
 ERROR_PATTERN=2
 ERROR_SOUND=
+
+# Only a fallback. The status line records the real reset time straight from
+# Claude Code, and that always wins. This is how far ahead to guess if you hit
+# the limit before the status line ever ran.
+WINDOW_HOURS=5
+
+# Your five hour limit resetting, so you know you can work again.
+LIMIT_RESET_ENABLED=1
+LIMIT_RESET_VOLUME=100
+LIMIT_RESET_PATTERN=2x180
+LIMIT_RESET_SOUND=
+
+# The seven day limit resetting. Rare, so it is on: about once a week, and
+# genuinely worth knowing.
+WEEKLY_RESET_ENABLED=1
+WEEKLY_RESET_VOLUME=70
+WEEKLY_RESET_PATTERN=1
+WEEKLY_RESET_SOUND=
 "@
     [System.IO.File]::WriteAllText($confFile, $text + "`n", (New-Object System.Text.UTF8Encoding($false)))
 }
@@ -397,7 +416,20 @@ if ($Uninstall) {
     if ($hooks.Count -eq 0) { $settings.Remove('hooks') }
     Save-Json -Data $settings -Path $settingsPath
     if (Test-Path $notifyScript) { Remove-Item $notifyScript -Force }
+    if (Test-Path $statusLineScript) { Remove-Item $statusLineScript -Force }
+    foreach ($leftover in @('claude-limits.json', 'claude-reset-fired',
+                            'claude-limit-reset', 'claude-watch-alive',
+                            'claude-notify-pending')) {
+        $lp = Join-Path $claudeDir $leftover
+        if (Test-Path $lp) { Remove-Item $lp -Force -ErrorAction SilentlyContinue }
+    }
     if (Test-Path $soundDir) { Remove-Item $soundDir -Recurse -Force }
+
+    # Only unregister the status line if it is still ours.
+    $sl = $settings['statusLine']
+    if ($sl -is [hashtable] -and "$($sl['command'])" -like '*claude-sounds-statusline*') {
+        $settings.Remove('statusLine')
+    }
     Write-Ok "removed. restart Claude Code."
     Write-Dim "left claude-notify.conf in place, in case you reinstall"
     Write-Host ""
@@ -415,8 +447,36 @@ foreach ($evt in @($hooks.Keys)) {
     if (@($hooks[$evt]).Count -eq 0) { $hooks.Remove($evt) }
 }
 
+# Registering the status line is the one change here visible in your terminal,
+# and people configure their own. So it is only set when there is none: an
+# existing one is left completely alone.
+$existingSl = $settings['statusLine']
+if ($existingSl -is [hashtable] -and $existingSl['command']) {
+    if ("$($existingSl['command'])" -like '*claude-sounds-statusline*') {
+        $slState = 'same'
+    } else {
+        $slState = 'other'
+    }
+} else {
+    $settings['statusLine'] = @{
+        type    = 'command'
+        command = ('powershell.exe -NoProfile -ExecutionPolicy Bypass -File "{0}"' -f $statusLineScript)
+        padding = 0
+    }
+    $slState = 'added'
+}
+
 Save-Json -Data $settings -Path $settingsPath
 Write-Ok "wired 5 hooks into settings.json"
+switch ($slState) {
+    'added' { Write-Ok "registered the status line" }
+    'same'  { Write-Step "status line already points here" }
+    'other' {
+        Write-Step "you already have a status line, so it was left alone"
+        Write-Dim "the reset alerts need it, so call this from your own script:"
+        Write-Dim "  powershell -NoProfile -File `"$statusLineScript`" > `$null"
+    }
+}
 
 # ------------------------------------------------------- the notifier script ---
 
@@ -426,6 +486,17 @@ $notifyBody = @'
 
 Set-Content -Path $notifyScript -Value $notifyBody -Encoding utf8
 Write-Ok "wrote claude-notify.ps1"
+
+# --------------------------------------------------------- the status line ---
+# This is what makes the reset alerts possible. Claude Code hands the status
+# line the real figures from Anthropic, including when your five hour and seven
+# day limits reset, and drawing that bar costs nothing because it happens
+# anyway. The script saves those times so the notifier can alert when they pass.
+$statusLineBody = @'
+@@STATUSLINE_PS1@@
+'@
+Set-Content -Path $statusLineScript -Value $statusLineBody -Encoding utf8
+Write-Ok "wrote claude-sounds-statusline.ps1"
 
 # ------------------------------------------------------------- the sounds ---
 # Written out from the base64 block at the end of this file, so a machine with
