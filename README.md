@@ -4,9 +4,13 @@
 
 Sound alerts for [Claude Code](https://code.claude.com), so you know when it needs you without watching the terminal.
 
+> An independent project, **not affiliated with or endorsed by Anthropic**.
+> Nothing leaves your machine unless you turn on phone push. See [NOTICE](NOTICE.md).
+
 Claude Code is fast enough that the bottleneck is often your attention, not the model. You give it a task, switch to something else, and come back ten minutes later to find it has been sitting there the whole time waiting for you to approve one file edit. Or it finished eight minutes ago. Or it stopped on an error you never saw.
 
-This wires four distinct sounds to four points in Claude Code's lifecycle:
+This wires a distinct sound to each point in Claude Code's lifecycle that is
+worth interrupting you for:
 
 | Sound | Fires when |
 | --- | --- |
@@ -342,6 +346,7 @@ There is a cleaner route I did not take. Hooks can return a `terminalSequence` f
 
 The Linux and macOS script is exercised by CI on real Linux and macOS runners, covering the settings merge, idempotency, uninstall, sound-file selection and the player fallback chain. What CI cannot cover is audio itself: the runners have no audio device, so the moment a player actually opens a sink is still the least proven part of this. If a sound does not play on your setup, open an issue with your distribution and audio stack and I will add it to the fallback chain.
 
-## License
+## Licence
 
-MIT. See [LICENSE](LICENSE).
+MIT, see [LICENSE](LICENSE). Trademarks, privacy and the absence of any warranty
+are covered in [NOTICE](NOTICE.md).
