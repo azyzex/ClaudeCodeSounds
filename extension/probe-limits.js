@@ -107,9 +107,84 @@
     return report;
   };
 
+  // ---- reading the usage endpoint ----------------------------------------
+
+  /** Describe a value, keeping what is useful and dropping what is private.
+   *
+   * Numbers, booleans and timestamps are shown, because a percentage and a
+   * reset time are the entire point. Every other string is reduced to its
+   * type and length. Field names are always shown: they are the schema, not
+   * the data.
+   */
+  function safeValue(v) {
+    if (v === null) return null;
+    if (typeof v === 'number' || typeof v === 'boolean') return v;
+    if (typeof v === 'string') {
+      if (/^\d{4}-\d{2}-\d{2}T[\d:.]+Z?$/.test(v)) return v;   // a timestamp
+      if (/^(free|pro|max|team|enterprise|claude_\w+)$/i.test(v)) return v;
+      return '<string, ' + v.length + " chars>";
+    }
+    return v;
+  }
+
+  function safeShape(node, depth) {
+    if (depth > 4) return '<deeper>';
+    if (Array.isArray(node)) {
+      return node.length ? [safeShape(node[0], depth + 1), '<' + node.length + ' items>'] : [];
+    }
+    if (node && typeof node === 'object') {
+      const out = {};
+      for (const [k, v] of Object.entries(node)) out[k] = safeShape(v, depth + 1);
+      return out;
+    }
+    return safeValue(node);
+  }
+
+  /** Fetch the usage endpoint and print its shape.
+   *
+   * This makes one GET request, to an endpoint the page already calls itself,
+   * using the session you are already signed into. It runs no model, so it
+   * consumes no tokens and does not touch your usage. Nothing is sent
+   * anywhere: the response is printed here and goes no further.
+   */
+  window.earshotUsage = async () => {
+    let org = null;
+    try {
+      const urls = performance.getEntriesByType('resource').map((e) => e.name).join(' ');
+      const m = urls.match(/organizations\/([0-9a-f-]{36})/i);
+      org = m && m[1];
+    } catch { /* nothing */ }
+    if (!org) {
+      console.log('%cCould not find the organisation id. Use the site briefly, then retry.', 'color:#c00');
+      return null;
+    }
+
+    const url = '/api/organizations/' + org + '/usage';
+    let body;
+    try {
+      const res = await fetch(url, { credentials: 'include' });
+      if (!res.ok) {
+        console.log('%c' + url.replace(org, '<org>') + ' returned ' + res.status, 'color:#c00');
+        return null;
+      }
+      body = await res.json();
+    } catch (e) {
+      console.log('%cRequest failed: ' + e.message, 'color:#c00');
+      return null;
+    }
+
+    const shape = safeShape(body, 0);
+    console.log('%c--- Earshot usage shape: copy below ---', 'font-weight:bold;font-size:13px');
+    console.log(JSON.stringify(shape, null, 2));
+    console.log('%c--- end ---', 'font-weight:bold;font-size:13px');
+    return shape;
+  };
+
   console.log(
-    '%cEarshot limits recon ready. Type:  earshotLimits()',
+    '%cEarshot limits recon ready.',
     'font-weight:bold;font-size:13px',
+    '\nearshotLimits()   what the page stores and which endpoints it calls',
+    '\nearshotUsage()    read the usage endpoint and show its shape',
     '\nUse the site for a minute first, so the page has made some requests.'
   );
 })();

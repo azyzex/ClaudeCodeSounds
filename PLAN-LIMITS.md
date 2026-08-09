@@ -56,6 +56,22 @@ Three possible outcomes, each of which decides Phase 2:
 3. **Nothing.** A real answer. The extension cannot do this, we say so in the
    README, and effort goes to Phase 4 instead.
 
+### Phase 1 result, 9 August 2026
+
+**Outcome 2.** Nothing usable is in storage: the timestamps found there belong
+to Intercom, a Google tag, and dismissed banners. But the page calls an
+endpoint of its own:
+
+```
+/api/organizations/<uuid>/usage
+```
+
+`overage_spend_limit` is billing and not relevant.
+
+So the reset time is not lying around in the page, but there is an endpoint
+that plausibly holds it. Whether it does, and what it costs to read, is
+Phase 2.
+
 ---
 
 ## Phase 2: decide, only after Phase 1 reports
