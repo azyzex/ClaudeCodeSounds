@@ -542,6 +542,12 @@ after=$(cat "$H/.claude/claude-notify.log" 2>/dev/null | wc -l | tr -d " ")
 check "$after" "$before" "silent until the time arrives"
 
 echo "  (it fires when the reset time passes, with no limit ever hit)"
+# The status line above spawned a watcher of its own, which is correct in real
+# use but races this one. Stop it and clear the record of what has fired, so the
+# next assertion is about the watcher under test rather than about timing.
+pkill -f "claude-notify.sh watch" 2>/dev/null || true
+sleep 1
+rm -f "$H/.claude/claude-reset-fired"
 past=$(( $(date +%s) - 5 ))
 printf 'updated=%s\nfive_hour_resets_at=%s\nseven_day_resets_at=%s\n' "$(date +%s)" "$past" "$past" \
   > "$H/.claude/claude-limits.json"
