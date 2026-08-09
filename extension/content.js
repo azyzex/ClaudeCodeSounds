@@ -28,11 +28,24 @@
 
   /** Is Claude currently generating?
    *
-   * Detected from controls rather than text: while a response streams there is
-   * a stop button, and when it ends there is not. Several selectors are tried
-   * because only one of them needs to survive any given redesign.
+   * Measured against the real page rather than assumed. While a reply streams,
+   * claude.ai sets aria-busy="true" on the message feed and shows a "Stop
+   * response" button; both are gone once it ends.
+   *
+   * aria-busy is the primary signal, and deliberately so. It is an
+   * accessibility contract rather than a label, which means it does not get
+   * reworded in a redesign and, unlike "Stop response", it does not change in
+   * another language. The stop button is the fallback for the same reason it
+   * was the original guess: if one of them survives a change, an alert still
+   * fires.
+   *
+   * There is no data-testid on either control. The only ones on the page are
+   * for the sidebar, user menu and model picker, so there is nothing sturdier
+   * to hook.
    */
   function isGenerating() {
+    const feed = document.querySelector('[role="feed"][aria-busy="true"]');
+    if (feed) return true;
     const stop =
       document.querySelector('[aria-label*="Stop response" i]') ||
       document.querySelector('[aria-label*="Stop generating" i]') ||
@@ -126,6 +139,16 @@
     }, 400);
   });
 
-  observer.observe(document.body, { childList: true, subtree: true });
+  // Attributes are watched, not just added and removed nodes. The end of a turn
+  // can be nothing but aria-busy flipping to false, and a childList-only
+  // observer would sit there having missed it. The filter keeps this cheap:
+  // only these three attributes wake it, out of the thousands the page churns
+  // through while streaming.
+  observer.observe(document.body, {
+    childList: true,
+    subtree: true,
+    attributes: true,
+    attributeFilter: ['aria-busy', 'aria-label', 'disabled'],
+  });
   check();
 })();

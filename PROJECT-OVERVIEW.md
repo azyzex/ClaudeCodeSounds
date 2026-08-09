@@ -1,4 +1,4 @@
-# ClaudeCodeSounds — project overview
+ddd²		dddddddss&dssClaudeCodeSounds — project overview
 
 A briefing document. It describes what this project is, how it is built, what
 already works, and what is being considered next. Written to be read on its own
@@ -215,7 +215,6 @@ to counting `WINDOW_HOURS` forward and says it is an estimate rather than
 stating a time it cannot know.
 
 ## Current state
-
 
 Five releases. Scripts at `v1.2.0`, app at `app-v0.2.0`, tagged separately so
 they ship independently.
