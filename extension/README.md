@@ -5,6 +5,12 @@ or hits a limit. Part of [Earshot](../BRAND.md), by Azyzex.
 
 **Not affiliated with Anthropic.**
 
+## Testing it
+
+See [TESTING.md](TESTING.md). The important part needs no install: paste
+[`probe.js`](probe.js) into the console on claude.ai and it reports what the
+page actually looks like while Claude is writing and after it stops.
+
 ## Installing it
 
 Not in any store yet. To load it by hand:
