@@ -190,10 +190,32 @@ own numbers rather than a local guess:
 Two alerts come out of it: `LIMIT_RESET` when the five hour window rolls over,
 and `WEEKLY_RESET` for the seven day one.
 
-The one gap: the reset time is only learned while Claude Code is open. Close it
-and the alert still fires, because the time is on disk. But if you have never
-opened Claude Code since the current window began, nothing on your machine knows
-when it ends.
+#### If you do not use Claude Code every window
+
+The reset time has to be learned from somewhere. Close Claude Code and the alert
+still fires, because the time is already on disk. But if nothing has read it
+since the current window began, nothing on your machine knows when the window
+ends.
+
+[Earshot for Web](extension/) closes most of that. It reads the same figures
+from the usage endpoint claude.ai already calls for itself, every ten minutes,
+only while a claude.ai tab is open. It runs no model, so it costs nothing
+either.
+
+Because the window is **per account rather than per surface**, only one of them
+has to read it. Spend the whole window in the desktop app and the countdown is
+still right, so long as Claude Code or a claude.ai tab was open at some point.
+
+Different accounts are kept apart rather than merged. Each surface writes its
+own file tagged with the account it saw, and an alert for one account never
+stands in for another. Claude Code signed into one account and the browser into
+another gives two separate countdowns, which is the only honest answer.
+
+**The gap that remains**, stated plainly: a window in which you open neither
+Claude Code nor claude.ai in a browser has nothing to learn the time from. The
+Claude desktop app does not record it anywhere durable, and the one route that
+would work means decrypting its session cookie, which is not something worth
+doing for a countdown.
 
 If you already have a status line, the installer leaves it alone and prints the
 one line to add to your own.
@@ -323,6 +345,31 @@ now.
 **The app is optional and never required.** The hooks own the alerting; the app
 only edits the same config file you could edit by hand. Removing the app leaves
 your alerts working.
+
+### Opening it
+
+It installs like any other program, so it is in the Start menu on Windows and
+the applications list on Linux, under **Claude Code Sounds**.
+
+Closing the window does not quit it. It keeps running in the tray, which is the
+point: that is what mutes the alerts without opening anything. Click the tray
+icon to bring the window back, or right click it for mute and quit.
+
+If it is not in the tray either, it is not running. Start it again from the Start
+menu, or directly:
+
+```powershell
+# Windows
+& "$env:LOCALAPPDATA\Programs\claude-code-sounds\claude-code-sounds.exe"
+```
+
+```bash
+# Linux, if installed from the .deb
+claude-code-sounds
+
+# or, if you kept the AppImage
+./ClaudeCodeSounds.AppImage
+```
 
 ## Development
 
