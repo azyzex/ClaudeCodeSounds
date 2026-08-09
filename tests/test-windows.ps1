@@ -406,7 +406,9 @@ function Get-PushField {
 Check (Get-PushField 'blocked') 'no' "no topic means no push"
 Set-Conf 'NTFY_TOPIC' 'test-topic'
 Set-Conf 'NTFY_SERVER' 'http://127.0.0.1:9'
-Check (Get-PushField 'blocked') 'sent' "a topic attempts a push"
+# Nothing is listening on port 9, so this exercises the failure path: the
+# push is reported as failed and the alert still completed.
+Check (Get-PushField 'blocked') 'failed' "an unreachable server is reported, not fatal"
 Check (Get-PushField 'done') 'no' "finished turns are not pushed by default"
 Set-Conf 'NTFY_TOPIC' ''
 

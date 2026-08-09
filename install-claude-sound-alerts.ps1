@@ -832,20 +832,25 @@ if (-not $dryRun -and ($Kind -ne 'done' -or $opt['TOAST_ON_DONE'] -eq '1')) {
 # local alert that already happened.
 $pushed = 'no'
 if ($opt['NTFY_TOPIC'] -and -not $dryRun -and (Test-InList $Kind $opt['NTFY_ALERTS'])) {
+    $url = "$($opt['NTFY_SERVER'].TrimEnd('/'))/$($opt['NTFY_TOPIC'])"
+    $prio = if ($Kind -eq 'done') { 'default' } else { 'high' }
+
+    # Sent inline with a short timeout, rather than handed to a background job
+    # or to curl.exe. Both of those were tried: a job needs its arguments
+    # marshalled across a runspace boundary, and PowerShell 5.1's Start-Process
+    # does not quote the elements of -ArgumentList, so a header containing a
+    # space silently arrives as several arguments and the push is lost.
+    #
+    # Waiting here costs nothing that matters: the hook is async, so Claude Code
+    # is not held up, and the sound has already played by this point.
     try {
-        $url = "$($opt['NTFY_SERVER'].TrimEnd('/'))/$($opt['NTFY_TOPIC'])"
-        $prio = if ($Kind -eq 'done') { 'default' } else { 'high' }
         $headers = @{ Title = $title; Priority = $prio; Tags = 'bell' }
-        $job = Start-Job -ScriptBlock {
-            param($u, $h, $b)
-            try { Invoke-RestMethod -Uri $u -Method Post -Headers $h -Body $b -TimeoutSec 8 } catch { }
-        } -ArgumentList $url, $headers, $detail
-        # Bounded wait, then let it finish on its own. The alert has already
-        # been played; the push is a bonus, not something to block on.
-        $null = Wait-Job $job -Timeout 8
-        Remove-Job $job -Force -ErrorAction SilentlyContinue
+        Invoke-RestMethod -Uri $url -Method Post -Headers $headers `
+            -Body $detail -TimeoutSec 8 | Out-Null
         $pushed = 'sent'
-    } catch { }
+    } catch {
+        $pushed = 'failed'
+    }
 }
 
 # --- report -------------------------------------------------------------------
