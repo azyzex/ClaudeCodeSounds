@@ -172,84 +172,52 @@ daemon or GUI session.
 
 ---
 
-## Proposed next feature: a usage-limit reset notifier
+## Knowing when the limit resets
 
-**This is the part that does not exist yet, and the reason this document was
-written.**
+**Built.** Claude Code hands its status line the real figures, straight from
+Anthropic:
 
-### The idea
-
-Claude Code enforces a usage limit on a rolling window (commonly described as
-five hours). When you hit it, work stops. The current project can already tell
-you *that* you have been rate limited, with its own distinct sound, because
-`StopFailure` exposes a `rate_limit` matcher.
-
-What it cannot tell you is **when the limit resets**. That is the more useful
-alert: being told "you can work again now" is worth more than being told "you
-are blocked", because the second one is obvious the moment it happens and the
-first one is the moment you actually want to come back.
-
-Desired behaviour:
-
-- When the limit is hit, work out when it resets
-- At that moment, notify on the **desktop** and on the **phone**
-- Ideally also a countdown visible in the app and the tray
-
-### What is already in place for it
-
-- The `StopFailure` / `rate_limit` hook already fires at the exact moment the
-  limit is hit, and receives the error payload on stdin
-- The notifier already parses fields out of that payload
-- The desktop app is already tray-resident, so it has somewhere to run a timer
-  and fire a notification later, which a hook cannot do because a hook exits
-  immediately
-- Desktop notification plumbing already exists on all three platforms
-
-### Open questions to work through
-
-1. **Where does the reset time come from?** The rate-limit error message may
-   contain it. If so, parsing it is the whole job. If not, the fallback is to
-   assume a fixed window from the moment the limit was hit, which is an estimate
-   rather than a fact and should be presented as one.
-2. **What does "five hours" actually mean** for the plan in question, and does
-   it differ across plans? An alert that is confidently wrong is worse than none.
-3. **Phone delivery.** See below.
-4. **What if the machine sleeps** between hitting the limit and the reset? A
-   timer in a resident process does not survive that reliably; a stored absolute
-   timestamp checked on wake does.
-
-### Phone push, explained
-
-There is no need for a mobile app. The established pattern is a **push relay**:
-
-**[ntfy.sh](https://ntfy.sh)** is the usual choice. You pick an unguessable
-topic name, install the free ntfy app on your phone and subscribe to that topic,
-and anything that can make an HTTP request can then push to it:
-
-```
-curl -d "Your Claude Code limit has reset" ntfy.sh/your-secret-topic-name
+```json
+"rate_limits": {
+  "five_hour": { "used_percentage": 23.5, "resets_at": 1738425600 },
+  "seven_day": { "used_percentage": 41.2, "resets_at": 1738857600 }
+}
 ```
 
-That is the entire integration. No account, no API key, no server, free, and it
-is open source and self-hostable later if wanted.
+The installer registers a status line script that saves those times; the
+notifier alerts when they pass, with sound, desktop notification and an optional
+phone push.
 
-The trade-offs to be honest about:
+Three properties follow from using the server's own numbers rather than a local
+guess:
 
-- **The topic name is the only secret.** Anyone who knows it can read your
-  notifications and send to them. Use something long and random, and never put
-  anything sensitive in the message body.
-- **It leaves your machine.** The message transits a third-party server. For
-  "your limit reset" that is unremarkable, but it is a different privacy posture
-  from a purely local tool, and it should be off by default and opt-in.
+- **No token cost.** Claude Code draws that bar regardless. Nothing is requested.
+- **Every surface counts.** The web, the phone, the desktop app, another
+  machine. It is all already in that percentage.
+- **The limit never has to be hit.** `resets_at` is present at 5% as much as at
+  100%, which is what made the earlier stopwatch approach unnecessary.
 
-Alternatives considered: Pushover (better polish, one-off payment, so ruled out
-by the no-cost constraint), Telegram or Discord webhooks (work fine, but require
-a bot and an account), and Apple or Google push directly (require developer
-accounts and cost money).
+Two alerts come out of it: `LIMIT_RESET` for the five hour window and
+`WEEKLY_RESET` for the seven day one.
 
----
+A hook cannot wait for that moment, since it exits as soon as it finishes, so
+the notifier starts a copy of itself in the background to watch the clock. That
+keeps the desktop app optional, which is a hard constraint here. The watcher
+compares against an absolute time once a minute rather than sleeping, so a
+machine that suspends fires on wake rather than late.
+
+**Known gap.** The reset time is only learned while Claude Code is open. Once
+learned it is on disk, so the alert still fires with everything closed. But if
+Claude Code has never run since the current window began, nothing on the machine
+knows when it ends. There is no way around that: if nothing here has spoken to
+Anthropic, nothing here can know.
+
+If you hit the limit before the status line has ever run, the alert falls back
+to counting `WINDOW_HOURS` forward and says it is an estimate rather than
+stating a time it cannot know.
 
 ## Current state
+
 
 Five releases. Scripts at `v1.2.0`, app at `app-v0.2.0`, tagged separately so
 they ship independently.
