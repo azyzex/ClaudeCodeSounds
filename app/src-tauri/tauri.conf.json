@@ -1,65 +1,67 @@
-{
-  "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Claude Code Sounds",
-  "version": "0.2.0",
-  "identifier": "com.azyzex.claudecodesounds",
-  "build": {
-    "frontendDist": "../ui"
-  },
-  "app": {
-    "withGlobalTauri": true,
-    "windows": [
-      {
-        "title": "Claude Code Sounds",
-        "width": 860,
-        "height": 760,
-        "minWidth": 620,
-        "minHeight": 520,
-        "resizable": true
-      }
-    ],
-    "security": {
-      "csp": "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; media-src 'self' asset: http://asset.localhost"
-    }
-  },
-  "bundle": {
-    "active": true,
-    "targets": [
-      "deb",
-      "appimage",
-      "msi",
-      "app",
-      "dmg"
-    ],
-    "category": "DeveloperTool",
-    "shortDescription": "Configure Claude Code sound alerts",
-    "longDescription": "A configurator for Claude Code sound alerts. The alerts themselves are shell and PowerShell hooks that keep working with or without this app installed.",
-    "icon": [
-      "icons/32x32.png",
-      "icons/128x128.png",
-      "icons/128x128@2x.png",
-      "icons/icon.icns",
-      "icons/icon.ico"
-    ],
-    "resources": {
-      "../../notifier/claude-notify.sh": "notifier/claude-notify.sh",
-      "../../notifier/claude-notify.ps1": "notifier/claude-notify.ps1",
-      "../../sounds/default/*.wav": "sounds/default/"
-    },
-    "linux": {
-      "deb": {
-        "depends": []
-      }
-    }
-  },
-  "plugins": {
-    "updater": {
-      "active": true,
-      "endpoints": [
-        "https://github.com/azyzex/ClaudeCodeSounds/releases/latest/download/latest.json"
-      ],
-      "dialog": true,
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IERFNjc1MzUxQzRBNUJBNApSV1NrVzBvY05YWG1EYzVKcHJ1RkRNU0FiZ1d3WDFtU2o1c1hoR3dZdE00OWZMeUowTVhLai9pOQo="
-    }
-  }
+﻿{
+    "$schema":  "https://schema.tauri.app/config/2",
+    "productName":  "Claude Code Sounds",
+    "version":  "0.3.0",
+    "identifier":  "com.azyzex.claudecodesounds",
+    "build":  {
+                  "frontendDist":  "../ui"
+              },
+    "app":  {
+                "withGlobalTauri":  true,
+                "windows":  [
+                                {
+                                    "title":  "Claude Code Sounds",
+                                    "width":  860,
+                                    "height":  760,
+                                    "minWidth":  620,
+                                    "minHeight":  520,
+                                    "resizable":  true
+                                }
+                            ],
+                "security":  {
+                                 "csp":  "default-src \u0027self\u0027; style-src \u0027self\u0027 \u0027unsafe-inline\u0027; img-src \u0027self\u0027 data:; media-src \u0027self\u0027 asset: http://asset.localhost"
+                             }
+            },
+    "bundle":  {
+                   "active":  true,
+                   "targets":  [
+                                   "deb",
+                                   "appimage",
+                                   "msi",
+                                   "app",
+                                   "dmg"
+                               ],
+                   "category":  "DeveloperTool",
+                   "shortDescription":  "Configure Claude Code sound alerts",
+                   "longDescription":  "A configurator for Claude Code sound alerts. The alerts themselves are shell and PowerShell hooks that keep working with or without this app installed.",
+                   "icon":  [
+                                "icons/32x32.png",
+                                "icons/128x128.png",
+                                "icons/128x128@2x.png",
+                                "icons/icon.icns",
+                                "icons/icon.ico"
+                            ],
+                   "resources":  {
+                                     "../../notifier/claude-notify.sh":  "notifier/claude-notify.sh",
+                                     "../../notifier/claude-notify.ps1":  "notifier/claude-notify.ps1",
+                                     "../../sounds/default/*.wav":  "sounds/default/"
+                                 },
+                   "linux":  {
+                                 "deb":  {
+                                             "depends":  [
+
+                                                         ]
+                                         }
+                             }
+               },
+    "plugins":  {
+                    "updater":  {
+                                    "active":  true,
+                                    "endpoints":  [
+                                                      "https://github.com/azyzex/ClaudeCodeSounds/releases/latest/download/latest.json"
+                                                  ],
+                                    "dialog":  true,
+                                    "pubkey":  "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IERFNjc1MzUxQzRBNUJBNApSV1NrVzBvY05YWG1EYzVKcHJ1RkRNU0FiZ1d3WDFtU2o1c1hoR3dZdE00OWZMeUowTVhLai9pOQo="
+                                }
+                }
 }
