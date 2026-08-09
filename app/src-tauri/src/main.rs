@@ -588,6 +588,10 @@ X-GNOME-Autostart-enabled=true
 
 fn main() {
     tauri::Builder::default()
+        // Tauri's updater signs releases with its own free keypair, which has
+        // nothing to do with the code signing certificates this project does
+        // not buy. Without it, nobody ever learns a new version exists.
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
             build_tray(app.handle())?;
             start_escalation_watcher(app.handle().clone());

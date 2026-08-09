@@ -40,6 +40,7 @@ $opt = @{
     NTFY_TOPIC            = ''
     NTFY_SERVER           = 'https://ntfy.sh'
     NTFY_ALERTS           = 'blocked,limit,error'
+    RESPECT_DND           = '1'
     SOUND_PACK            = 'default'
 
     # Per-event, keyed by the uppercased kind. Flat keys rather than sections,
@@ -160,6 +161,26 @@ if (-not $force -and $opt['MUTE_UNTIL'] -match '^\d+$') {
         Write-Decision "kind=$Kind suppressed=quiet-until until=$($opt['MUTE_UNTIL'])"
         exit 0
     }
+}
+
+# --- is the desktop already in do not disturb? ---------------------------------
+# Focus Assist has no supported API. This reads the value the shell writes, at a
+# path that has moved between Windows releases, so it fails open: if the answer
+# cannot be determined the alert happens. Being wrongly silent is worse than
+# being wrongly noisy, because a missed prompt is the problem this exists for.
+function Test-DoNotDisturb {
+    if ($opt['RESPECT_DND'] -ne '1') { return $false }
+    try {
+        $base = 'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Notifications\Settings'
+        $v = Get-ItemProperty -Path $base -Name 'NOC_GLOBAL_SETTING_TOASTS_ENABLED' -ErrorAction Stop
+        # 0 means notifications are switched off globally.
+        return ($v.NOC_GLOBAL_SETTING_TOASTS_ENABLED -eq 0)
+    } catch { return $false }
+}
+
+if (-not $force -and (Test-DoNotDisturb)) {
+    Write-Decision "kind=$Kind suppressed=do-not-disturb"
+    exit 0
 }
 
 # --- quiet hours? -------------------------------------------------------------

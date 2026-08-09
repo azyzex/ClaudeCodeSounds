@@ -277,6 +277,10 @@ ESCALATE_AFTER=0
 # editing it here does not add or remove the startup entry.
 LAUNCH_AT_LOGIN=0
 
+# Stay silent while the desktop itself is in do not disturb. Best effort: where
+# it cannot be determined, the alert happens rather than being lost.
+RESPECT_DND=1
+
 # ---------------------------------------------------------------------------
 # Per-event settings. One group per alert kind.
 #

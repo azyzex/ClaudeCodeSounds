@@ -116,6 +116,8 @@ Or edit the file directly. The notifier re-reads it on every alert, so changes t
 | `ALWAYS_ALERT` | `blocked,limit,error` | Kinds that ignore `MIN_SECONDS` and the focus check, because you want to know regardless. |
 | `MUTE` | empty | Kinds to silence completely. |
 | `QUIET_HOURS` | empty | Silence everything inside a window, for example `23:00-08:00`. Windows that wrap past midnight work. |
+| `RESPECT_DND` | `1` | Stay silent while the desktop is in do not disturb. Best effort: where it cannot be determined, the alert happens. |
+| `ESCALATE_AFTER` | `0` | Nudge once more if a prompt goes unanswered this long. Needs the app running. |
 | `MUTE_UNTIL` | empty | Silence everything until this epoch second, then expire. What the tray's "quiet for an hour" writes. |
 | `NTFY_TOPIC` | empty | Push alerts to your phone. Empty disables it. See below. |
 | `NTFY_SERVER` | `https://ntfy.sh` | Where to push. Change it if you self-host. |

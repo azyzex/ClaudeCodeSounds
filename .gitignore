@@ -15,3 +15,7 @@ Thumbs.db
 app/src-tauri/target/
 app/node_modules/
 app/src-tauri/gen/
+
+# never commit the updater signing key
+TAURI_SIGNING_PRIVATE_KEY.txt
+*.key

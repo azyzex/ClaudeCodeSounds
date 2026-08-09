@@ -233,6 +233,10 @@ ESCALATE_AFTER=0
 # editing it here does not add or remove the startup entry.
 LAUNCH_AT_LOGIN=0
 
+# Stay silent while the desktop itself is in do not disturb. Best effort: where
+# it cannot be determined, the alert happens rather than being lost.
+RESPECT_DND=1
+
 # ---------------------------------------------------------------------------
 # Per-event settings. One group per alert kind.
 #
@@ -448,6 +452,7 @@ MUTE_UNTIL=$(cfg MUTE_UNTIL "")
 NTFY_TOPIC=$(cfg NTFY_TOPIC "")
 NTFY_SERVER=$(cfg NTFY_SERVER "https://ntfy.sh")
 NTFY_ALERTS=$(cfg NTFY_ALERTS "blocked,limit,error")
+RESPECT_DND=$(cfg RESPECT_DND 1)
 SOUND_PACK=$(cfg SOUND_PACK "default")
 # A pack name is a single directory component, never a path.
 case "$SOUND_PACK" in ""|*/*|.*) SOUND_PACK="default" ;; esac
@@ -593,6 +598,36 @@ if [ "$FORCE" != "1" ]; then
          exit 0
        fi ;;
   esac
+fi
+
+# --- is the desktop already in do not disturb? ---------------------------------
+# Best effort, and it fails open: if the answer cannot be determined the alert
+# happens. Being wrongly silent is worse than being wrongly noisy, because a
+# missed prompt is the whole problem this exists to solve.
+dnd_active() {
+  [ "$RESPECT_DND" = "1" ] || return 1
+  if [ "$(uname -s)" = "Darwin" ]; then
+    # Focus modes are not exposed by any supported API. This reads the file the
+    # system writes, which is unofficial and may simply not be there.
+    f="$HOME/Library/DoNotDisturb/DB/Assertions.json"
+    [ -f "$f" ] || return 1
+    grep -q 'storeAssertionRecords' "$f" 2>/dev/null || return 1
+    grep -q 'assertionDetails' "$f" 2>/dev/null && return 0
+    return 1
+  fi
+  # Freedesktop desktops expose it on the session bus.
+  command -v gdbus >/dev/null 2>&1 || return 1
+  out=$(gdbus call --session --dest org.freedesktop.Notifications \
+        --object-path /org/freedesktop/Notifications \
+        --method org.freedesktop.DBus.Properties.Get \
+        org.freedesktop.Notifications Inhibited 2>/dev/null) || return 1
+  case "$out" in *true*) return 0 ;; esac
+  return 1
+}
+
+if [ "$FORCE" != "1" ] && dnd_active; then
+  record "kind=$KIND suppressed=do-not-disturb"
+  exit 0
 fi
 
 # --- quiet hours? -------------------------------------------------------------
