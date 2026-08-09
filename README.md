@@ -117,6 +117,9 @@ Or edit the file directly. The notifier re-reads it on every alert, so changes t
 | `MUTE` | empty | Kinds to silence completely. |
 | `QUIET_HOURS` | empty | Silence everything inside a window, for example `23:00-08:00`. Windows that wrap past midnight work. |
 | `MUTE_UNTIL` | empty | Silence everything until this epoch second, then expire. What the tray's "quiet for an hour" writes. |
+| `NTFY_TOPIC` | empty | Push alerts to your phone. Empty disables it. See below. |
+| `NTFY_SERVER` | `https://ntfy.sh` | Where to push. Change it if you self-host. |
+| `NTFY_ALERTS` | `blocked,limit,error` | Which kinds to push. Pushing every finished turn to a phone gets old fast. |
 | `SOUND_PACK` | `default` | Which pack to use. See below. |
 
 ### Per-event settings
@@ -154,7 +157,21 @@ If the bundled sounds are missing, the notifier falls back to the system set: `C
 
 The sounds are generated rather than sourced, by `build/make-sounds.py`, so they are reproducible and carry no licensing question. Six of the nine are interchangeable finish chimes, which is what gives `PROJECT_PITCH` its range.
 
-### Sound packs
+### Alerts on your phone
+
+Set `NTFY_TOPIC` to a long, random string, install the free
+[ntfy](https://ntfy.sh) app, and subscribe to that topic. That is the whole
+setup: no account, no API key, no server.
+
+**The topic name is the only secret.** Anyone who knows it can read your
+notifications and send to them, so make it long and random, and do not put
+anything sensitive in an alert. It is also a third-party server, so the message
+leaves your machine. Both are why this is off by default.
+
+Pushes are fired without waiting: a phone that is unreachable never costs you
+the local alert that already played.
+
+## Sound packs
 
 A pack is just a folder. To make your own, put `.wav` files in `~/.claude/claude-sounds/<name>/` using the same filenames as `default/`, then set `SOUND_PACK=<name>`.
 

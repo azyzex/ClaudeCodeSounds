@@ -382,6 +382,34 @@ Set-Conf 'QUIET_HOURS' 'not-a-window'
 Assert ((Get-Decision 'blocked') -notlike '*suppressed=quiet-hours*') "an unparseable window is ignored"
 Set-Conf 'QUIET_HOURS' ''
 
+Write-Host "  (phone push is off unless a topic is set)"
+# Not dry run: the push is deliberately skipped there. With no topic set,
+# nothing leaves the machine.
+function Get-PushField {
+    param([string]$Kind)
+    Remove-Item (Join-Path $env:TEMP 'claude-notify.last') -Force -ErrorAction SilentlyContinue
+    $prev = $env:USERPROFILE
+    # DRYRUN off: the push is deliberately skipped in a dry run and would
+    # never be exercised otherwise.
+    $prevDry = $env:CLAUDE_NOTIFY_DRYRUN
+    $env:CLAUDE_NOTIFY_DRYRUN = $null
+    $env:USERPROFILE = $h; $env:CLAUDE_NOTIFY_FORCE = '1'; $env:CLAUDE_NOTIFY_DEBUG = '1'
+    try {
+        $out = '{}' | & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $n -Kind $Kind 2>$null
+        return (Get-Field ($out | Out-String).Trim() 'pushed')
+    } finally {
+        $env:USERPROFILE = $prev
+        $env:CLAUDE_NOTIFY_DRYRUN = $prevDry
+        $env:CLAUDE_NOTIFY_FORCE = $null; $env:CLAUDE_NOTIFY_DEBUG = $null
+    }
+}
+Check (Get-PushField 'blocked') 'no' "no topic means no push"
+Set-Conf 'NTFY_TOPIC' 'test-topic'
+Set-Conf 'NTFY_SERVER' 'http://127.0.0.1:9'
+Check (Get-PushField 'blocked') 'sent' "a topic attempts a push"
+Check (Get-PushField 'done') 'no' "finished turns are not pushed by default"
+Set-Conf 'NTFY_TOPIC' ''
+
 Write-Host "  (a temporary mute expires by itself)"
 $future = [int][double]::Parse((Get-Date -UFormat %s)) + 3600
 Set-Conf 'MUTE_UNTIL' "$future"

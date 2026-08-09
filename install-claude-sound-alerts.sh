@@ -78,6 +78,9 @@ ALWAYS_ALERT="blocked,limit,error"
 MUTE=""
 QUIET_HOURS=""
 MUTE_UNTIL=""
+NTFY_TOPIC=""
+NTFY_SERVER="https://ntfy.sh"
+NTFY_ALERTS="blocked,limit,error"
 SOUND_PACK="default"
 DONE_VOLUME=70
 BLOCKED_VOLUME=100
@@ -96,6 +99,7 @@ load_conf() {
   [ -f "$CONF_FILE" ] || return 0
   for key in MIN_SECONDS SUPPRESS_WHEN_FOCUSED PROJECT_PITCH SPEAK \
              TOAST_ON_DONE DEBOUNCE_SECONDS ALWAYS_ALERT MUTE QUIET_HOURS MUTE_UNTIL SOUND_PACK \
+             NTFY_TOPIC NTFY_SERVER NTFY_ALERTS \
              DONE_VOLUME BLOCKED_VOLUME LIMIT_VOLUME ERROR_VOLUME; do
     v=$(conf_get "$key")
     # An explicit if, not `[ -n "$v" ] && eval ...`: MUTE is empty by default and
@@ -207,6 +211,18 @@ SOUND_PACK=$SOUND_PACK
 # Silence everything until this epoch second. The desktop app's "quiet for an
 # hour" writes it; it expires by itself. Leave empty for no temporary mute.
 MUTE_UNTIL=$MUTE_UNTIL
+
+# Push alerts to your phone through ntfy.sh. Leave the topic empty to disable.
+#
+# Pick a long, random topic name, install the free ntfy app and subscribe to it.
+# The topic name is the whole address AND the whole secret: anyone who knows it
+# can read your notifications and send to them, so do not put anything sensitive
+# in an alert message.
+NTFY_TOPIC=$NTFY_TOPIC
+NTFY_SERVER=$NTFY_SERVER
+
+# Which kinds to push. Pushing every finished turn to a phone gets old fast.
+NTFY_ALERTS=$NTFY_ALERTS
 
 # ---------------------------------------------------------------------------
 # Per-event settings. One group per alert kind.
@@ -420,6 +436,9 @@ ALWAYS_ALERT=$(cfg ALWAYS_ALERT "blocked,limit,error")
 MUTE=$(cfg MUTE "")
 QUIET_HOURS=$(cfg QUIET_HOURS "")
 MUTE_UNTIL=$(cfg MUTE_UNTIL "")
+NTFY_TOPIC=$(cfg NTFY_TOPIC "")
+NTFY_SERVER=$(cfg NTFY_SERVER "https://ntfy.sh")
+NTFY_ALERTS=$(cfg NTFY_ALERTS "blocked,limit,error")
 SOUND_PACK=$(cfg SOUND_PACK "default")
 # A pack name is a single directory component, never a path.
 case "$SOUND_PACK" in ""|*/*|.*) SOUND_PACK="default" ;; esac
@@ -891,13 +910,26 @@ elif [ "$KIND" != "done" ] || [ "$TOAST_ON_DONE" = "1" ]; then
   fi
 fi
 
+# --- push to a phone ----------------------------------------------------------
+# ntfy.sh needs no account or API key: the topic name is the whole address, and
+# also the whole secret, so it is off unless someone sets one.
+#
+# Backgrounded and time limited, because a notification must never make Claude
+# Code wait on the network, and a phone that is unreachable is not a reason to
+# lose the local alert that already happened.
+PUSHED=no
+if [ -n "$NTFY_TOPIC" ] && [ "${CLAUDE_NOTIFY_DRYRUN:-0}" != "1" ]    && in_list "$KIND" "$NTFY_ALERTS" && command -v curl >/dev/null 2>&1; then
+  ( curl -fsS -m 8       -H "Title: $TITLE"       -H "Priority: $([ "$KIND" = "done" ] && echo default || echo high)"       -H "Tags: bell"       -d "$DETAIL"       "$NTFY_SERVER/$NTFY_TOPIC" >/dev/null 2>&1 & ) 2>/dev/null
+  PUSHED=queued
+fi
+
 # --- report ------------------------------------------------------------------
 # CLAUDE_NOTIFY_DEBUG=1 prints the decision instead of staying silent. Useful
 # for working out why nothing is audible, and it is what CI asserts on, since a
 # zero exit alone cannot distinguish a played sound from a fallback bell.
-record "$(printf 'kind=%s sound=%s player=%s volume=%s pattern=%sx%s notified=%s elapsed=%s detail=%s' \
+record "$(printf 'kind=%s sound=%s player=%s volume=%s pattern=%sx%s notified=%s pushed=%s elapsed=%s detail=%s' \
   "$KIND" "${SOUND:-none}" "${PLAYER_USED:-bell}" "$EV_VOLUME" \
-  "$REPEAT_COUNT" "$REPEAT_GAP" "$NOTIFIED" "${ELAPSED:-na}" "$DETAIL")"
+  "$REPEAT_COUNT" "$REPEAT_GAP" "$NOTIFIED" "$PUSHED" "${ELAPSED:-na}" "$DETAIL")"
 
 exit 0
 NOTIFYEOF

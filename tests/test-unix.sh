@@ -347,6 +347,29 @@ r=$(decide blocked)
 case "$r" in *suppressed=quiet-hours*) bad "unparseable window silenced everything" ;; *) ok "an unparseable window is ignored" ;; esac
 setconf QUIET_HOURS ""
 
+echo "  (phone push is off unless a topic is set)"
+# Not dry run: the push is deliberately skipped there, so it has to be checked
+# on the real path. There is no topic, so nothing leaves the machine.
+pushfield() {
+  rm -f "${TMPDIR:-/tmp}"/claude-notify.*.last
+  # CLAUDE_NOTIFY_DRYRUN=0 overrides the export this case sets: the push is
+  # deliberately skipped in a dry run and would never be exercised otherwise.
+  out=$(printf '{}' | HOME="$H" CLAUDE_NOTIFY_DRYRUN=0 CLAUDE_NOTIFY_FORCE=1 \
+    CLAUDE_NOTIFY_DEBUG=1 bash "$N" "$1" 2>/dev/null | tr -d '\r')
+  field "$out" pushed
+}
+check "$(pushfield blocked)" "no" "no topic means no push"
+# A topic pointed at a port nothing is listening on: queued, but the alert still
+# completes, because an unreachable phone must not cost you the local alert.
+setconf NTFY_TOPIC "test-topic"
+setconf NTFY_SERVER "http://127.0.0.1:9"
+check "$(pushfield blocked)" "queued" "a topic queues a push"
+check "$(pushfield "done")" "no" "finished turns are not pushed by default"
+setconf NTFY_ALERTS "done,blocked,limit,error"
+check "$(pushfield "done")" "queued" "NTFY_ALERTS controls which kinds push"
+setconf NTFY_TOPIC ""
+setconf NTFY_ALERTS "blocked,limit,error"
+
 echo "  (a temporary mute expires by itself)"
 setconf MUTE_UNTIL "$(( $(date +%s) + 3600 ))"
 r=$(decide blocked)

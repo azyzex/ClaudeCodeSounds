@@ -121,7 +121,7 @@ happens.
 - [ ] Establish where the reset time comes from: parsed from the rate-limit
       payload if it is there, otherwise an estimate that is labelled as one
 - [ ] Desktop notification at reset, fired by the tray process
-- [ ] Phone push via ntfy.sh, opt in and off by default
+- [x] Phone push via ntfy.sh, opt in and off by default (landed in Phase 4)
 - [ ] Countdown in the app and the tray tooltip
 - [ ] Survive sleep: store an absolute timestamp and check on wake, rather than
       relying on a timer

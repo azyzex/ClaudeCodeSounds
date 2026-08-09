@@ -135,6 +135,9 @@ $opt = [ordered]@{
     MUTE                  = ''
     QUIET_HOURS           = ''
     MUTE_UNTIL            = ''
+    NTFY_TOPIC            = ''
+    NTFY_SERVER           = 'https://ntfy.sh'
+    NTFY_ALERTS           = 'blocked,limit,error'
     SOUND_PACK            = 'default'
     DONE_VOLUME           = '70'
     BLOCKED_VOLUME        = '100'
@@ -253,6 +256,18 @@ SOUND_PACK=$($opt['SOUND_PACK'])
 # Silence everything until this epoch second. The desktop app's "quiet for an
 # hour" writes it; it expires by itself. Leave empty for no temporary mute.
 MUTE_UNTIL=$($opt['MUTE_UNTIL'])
+
+# Push alerts to your phone through ntfy.sh. Leave the topic empty to disable.
+#
+# Pick a long, random topic name, install the free ntfy app and subscribe to it.
+# The topic name is the whole address AND the whole secret: anyone who knows it
+# can read your notifications and send to them, so do not put anything sensitive
+# in an alert message.
+NTFY_TOPIC=$($opt['NTFY_TOPIC'])
+NTFY_SERVER=$($opt['NTFY_SERVER'])
+
+# Which kinds to push. Pushing every finished turn to a phone gets old fast.
+NTFY_ALERTS=$($opt['NTFY_ALERTS'])
 
 # ---------------------------------------------------------------------------
 # Per-event settings. One group per alert kind.
@@ -433,6 +448,9 @@ $opt = @{
     MUTE                  = ''
     QUIET_HOURS           = ''
     MUTE_UNTIL            = ''
+    NTFY_TOPIC            = ''
+    NTFY_SERVER           = 'https://ntfy.sh'
+    NTFY_ALERTS           = 'blocked,limit,error'
     SOUND_PACK            = 'default'
 
     # Per-event, keyed by the uppercased kind. Flat keys rather than sections,
@@ -805,6 +823,31 @@ if (-not $dryRun -and ($Kind -ne 'done' -or $opt['TOAST_ON_DONE'] -eq '1')) {
     } catch { }
 }
 
+# --- push to a phone ----------------------------------------------------------
+# ntfy.sh needs no account or API key: the topic name is the whole address, and
+# also the whole secret, so it is off unless someone sets one.
+#
+# Started without waiting, because a notification must never make Claude Code
+# wait on the network, and an unreachable phone is not a reason to lose the
+# local alert that already happened.
+$pushed = 'no'
+if ($opt['NTFY_TOPIC'] -and -not $dryRun -and (Test-InList $Kind $opt['NTFY_ALERTS'])) {
+    try {
+        $url = "$($opt['NTFY_SERVER'].TrimEnd('/'))/$($opt['NTFY_TOPIC'])"
+        $prio = if ($Kind -eq 'done') { 'default' } else { 'high' }
+        $headers = @{ Title = $title; Priority = $prio; Tags = 'bell' }
+        $job = Start-Job -ScriptBlock {
+            param($u, $h, $b)
+            try { Invoke-RestMethod -Uri $u -Method Post -Headers $h -Body $b -TimeoutSec 8 } catch { }
+        } -ArgumentList $url, $headers, $detail
+        # Bounded wait, then let it finish on its own. The alert has already
+        # been played; the push is a bonus, not something to block on.
+        $null = Wait-Job $job -Timeout 8
+        Remove-Job $job -Force -ErrorAction SilentlyContinue
+        $pushed = 'sent'
+    } catch { }
+}
+
 # --- report -------------------------------------------------------------------
 # A zero exit alone cannot distinguish a played sound from a fallback beep, so
 # this is what CI asserts on, and it is the first step in working out why
@@ -812,7 +855,7 @@ if (-not $dryRun -and ($Kind -ne 'done' -or $opt['TOAST_ON_DONE'] -eq '1')) {
 $reportSound = if ($soundPath) { $soundPath } else { 'none' }
 $reportElapsed = if ($null -ne $elapsed) { $elapsed } else { 'na' }
 Write-Decision ("kind=$Kind sound=$reportSound player=$playerUsed volume=$evVolume " +
-                "pattern=${repeatCount}x${repeatGap} notified=$notified " +
+                "pattern=${repeatCount}x${repeatGap} notified=$notified pushed=$pushed " +
                 "elapsed=$reportElapsed detail=$detail")
 
 exit 0
