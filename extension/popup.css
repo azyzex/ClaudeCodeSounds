@@ -1,0 +1,13 @@
+:root { color-scheme: light dark; }
+body {
+  width: 270px; margin: 0; padding: 14px;
+  font: 13px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+h1 { font-size: 14px; margin: 0 0 12px; }
+h2 { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; opacity: .6; margin: 16px 0 6px; }
+.by { font-weight: 400; opacity: .5; }
+.row { display: flex; justify-content: space-between; align-items: center; padding: 6px 0; }
+.hint { font-size: 11px; opacity: .6; margin: 2px 0 0; }
+.foot { font-size: 10px; opacity: .45; margin: 14px 0 0; }
+.ev { display: flex; justify-content: space-between; font-size: 12px; padding: 3px 0; }
+.ev .when { opacity: .55; }

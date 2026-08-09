@@ -1,0 +1,29 @@
+{
+  "manifest_version": 3,
+  "name": "Earshot for Web",
+  "version": "0.1.0",
+  "description": "Know when Claude on the web finishes, needs you, or hits a limit. By Azyzex. Not affiliated with Anthropic.",
+  "author": "Azyzex",
+  "homepage_url": "https://github.com/azyzex/ClaudeCodeSounds",
+  "icons": {
+    "32": "icons/32x32.png",
+    "128": "icons/128x128.png"
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://claude.ai/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Earshot"
+  },
+  "permissions": ["storage", "notifications"],
+  "optional_permissions": ["nativeMessaging"],
+  "host_permissions": ["https://claude.ai/*"]
+}
