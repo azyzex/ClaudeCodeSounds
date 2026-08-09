@@ -59,6 +59,19 @@ print(json.dumps(cur) if isinstance(cur, (dict, list)) else cur)
 PYEOF
 }
 
+# Wait for something to actually happen rather than sleeping a fixed time. CI
+# machines have real audio, so a notifier call takes noticeably longer there
+# than on a box where playback falls straight through to a bell.
+wait_for() {  # wait_for <seconds> <shell test>
+  _deadline=$(( $(date +%s) + $1 ))
+  shift
+  while [ "$(date +%s)" -lt "$_deadline" ]; do
+    if eval "$*"; then return 0; fi
+    sleep 1
+  done
+  return 1
+}
+
 echo "installer: $INSTALLER"
 echo "python:    $PY"
 echo "platform:  $(uname -s)"
@@ -530,9 +543,9 @@ rm -f "$H/.claude/claude-watch-alive"
 printf '%s|estimated\n' "$(date +%s)" > "$H/.claude/claude-limit-reset"
 rm -f "${TMPDIR:-/tmp}"/claude-notify.*.last
 ( HOME="$H" bash "$N" watch >/dev/null 2>&1 & )
-sleep 4
+wait_for 30 "grep -q 'kind=limit-reset' '$H/.claude/claude-notify.log' 2>/dev/null" \
+  && ok "a limit-reset alert was recorded" || bad "no limit-reset alert"
 [ -f "$H/.claude/claude-limit-reset" ] && bad "the schedule was not cleared" || ok "fired and cleared the schedule"
-grep -q 'kind=limit-reset' "$H/.claude/claude-notify.log" && ok "a limit-reset alert was recorded" || bad "no limit-reset alert"
 grep -q 'probably reset' "$H/.claude/claude-notify.log" && ok "the wording admits it is an estimate" || bad "the estimate is not admitted"
 pkill -f "claude-notify.sh watch" 2>/dev/null || true
 
@@ -552,9 +565,9 @@ setconf WINDOW_RESET_ENABLED 1
 echo $(( $(date +%s) - 5*3600 - 10 )) > "$H/.claude/claude-window-start"
 rm -f "${TMPDIR:-/tmp}"/claude-notify.*.last
 ( HOME="$H" bash "$N" watch >/dev/null 2>&1 & )
-sleep 4
+wait_for 30 "grep -q 'kind=window-reset' '$H/.claude/claude-notify.log' 2>/dev/null" \
+  && ok "a window-reset alert was recorded" || bad "no window-reset alert"
 [ -f "$H/.claude/claude-window-start" ] && bad "the window was not cleared" || ok "the window rolled over with no limit involved"
-grep -q 'kind=window-reset' "$H/.claude/claude-notify.log" && ok "a window-reset alert was recorded" || bad "no window-reset alert"
 pkill -f "claude-notify.sh watch" 2>/dev/null || true
 
 echo "  (window reset is off by default)"
