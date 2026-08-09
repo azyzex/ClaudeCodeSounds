@@ -105,6 +105,15 @@ def render(template_path, placeholder, notifier_path):
                     'the embedded block early' % i
                 )
         out = out.replace('@@CLI@@', cli)
+    if '@@STATUSLINE@@' in out:
+        sl = read('statusline/claude-sounds-statusline.sh').replace('\r\n', '\n').rstrip('\n')
+        for i, line in enumerate(sl.split('\n'), 1):
+            if line.startswith('STATUSLINEEOF'):
+                raise SystemExit(
+                    'statusline line %d starts with STATUSLINEEOF, which would '
+                    'end the embedded block early' % i
+                )
+        out = out.replace('@@STATUSLINE@@', sl)
     if '@@SOUNDS@@' in out:
         out = out.replace('@@SOUNDS@@', sound_blob())
     return out.replace('\r\n', '\n')

@@ -163,29 +163,50 @@ The sounds are generated rather than sourced, by `build/make-sounds.py`, so they
 
 ### Knowing when you can work again
 
-Two separate things, because they are not the same:
+Claude Code hands its status line the real figures, straight from Anthropic:
 
-- **`LIMIT_RESET`** fires when a limit you actually hit has reset. On by default.
-- **`WINDOW_RESET`** fires when the usage window rolls over, even if you only
-  used part of it and were never blocked. Off by default, since most people only
-  care about being unblocked.
+```json
+"rate_limits": {
+  "five_hour": { "used_percentage": 23.5, "resets_at": 1738425600 },
+  "seven_day": { "used_percentage": 41.2, "resets_at": 1738857600 }
+}
+```
 
-Neither can be done by a hook alone, because a hook exits the moment it
-finishes and cannot wait five hours. So the notifier writes the target time to a
-file and starts a copy of itself in the background to watch the clock. No daemon
-to install, and it works whether or not the desktop app is present.
+The installer registers a small status line script that saves those times, and
+the notifier alerts when they pass. Three things follow from using the server's
+own numbers rather than a local guess:
+
+- **It costs nothing.** Claude Code draws that bar anyway. No request is made
+  and no tokens are used.
+- **It counts every surface.** The web, the phone, the desktop app, another
+  machine. All of it is already in that percentage.
+- **You never have to hit the limit.** The reset time is there at 5% just as
+  much as at 100%.
+
+Two alerts come out of it: `LIMIT_RESET` when the five hour window rolls over,
+and `WEEKLY_RESET` for the seven day one.
+
+The one gap: the reset time is only learned while Claude Code is open. Close it
+and the alert still fires, because the time is on disk. But if you have never
+opened Claude Code since the current window began, nothing on your machine knows
+when it ends.
+
+If you already have a status line, the installer leaves it alone and prints the
+one line to add to your own.
+
+Neither alert can be handled by a hook alone, because a hook exits the moment it
+finishes and cannot wait five hours. So the notifier starts a copy of itself in
+the background to watch the clock. No daemon to install, and it works whether or
+not the desktop app is present.
 
 The watcher compares against an absolute time rather than sleeping for a
 duration. Close the lid for three hours, open it, and the next check sees the
 time has passed and fires immediately.
 
-**The reset time is currently an estimate.** Claude Code's rate limit message
-almost certainly contains the real time, but the payload has never been captured
-rather than guessed at, so the alert counts `WINDOW_HOURS` forward from the
-moment you were blocked and says so: "about five hours have passed, your limit
-has probably reset". The notifier saves the next real payload to
-`~/.claude/claude-limit-payload.json`, and once there is one the alert can state
-a fact instead.
+If you hit the limit before the status line has ever run, there is nothing to
+read, so the alert falls back to counting `WINDOW_HOURS` forward and says so:
+"about five hours have passed, your limit has probably reset". A real reset time
+always wins over that guess.
 
 ## Alerts on your phone
 

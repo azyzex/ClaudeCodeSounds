@@ -511,70 +511,70 @@ rm -rf "$H"
 echo
 
 # --------------------------------------------------------------------------
-echo "case 10: usage limit and window resets"
+echo "case 10: limit resets, from the figures Claude Code reports"
 # --------------------------------------------------------------------------
 H=$(mktemp -d)
 HOME="$H" NO_TEST_TONE=1 NONINTERACTIVE=1 bash "$INSTALLER" >/dev/null 2>&1
 N="$H/.claude/claude-notify.sh"
 C="$H/.claude/claude-notify.conf"
+SL="$H/.claude/claude-sounds-statusline.sh"
 export CLAUDE_NOTIFY_DRYRUN=0
 
-echo "  (hitting the limit schedules a reset)"
-printf '{}' | HOME="$H" CLAUDE_NOTIFY_FORCE=1 bash "$N" limit >/dev/null 2>&1
-[ -f "$H/.claude/claude-limit-reset" ] && ok "a reset was scheduled" || bad "nothing was scheduled"
-scheduled=$(cut -d'|' -f1 < "$H/.claude/claude-limit-reset")
-# Five hours ahead, give or take the time the test took.
-gap=$(( scheduled - $(date +%s) ))
-[ "$gap" -gt 17000 ] && [ "$gap" -lt 18100 ] && ok "scheduled about five hours out" || bad "scheduled $gap seconds out"
-case "$(cat "$H/.claude/claude-limit-reset")" in
-  *estimated*) ok "flagged as an estimate rather than a known time" ;;
-  *) bad "not flagged as an estimate" ;;
-esac
+echo "  (the status line is installed and registered)"
+[ -x "$SL" ] && ok "the status line script was written" || bad "no status line script"
+grep -q 'claude-sounds-statusline' "$H/.claude/settings.json" \
+  && ok "registered in settings.json" || bad "not registered"
 
-echo "  (a second limit does not reschedule)"
-before=$(cat "$H/.claude/claude-limit-reset")
-rm -f "${TMPDIR:-/tmp}"/claude-notify.*.last
-printf '{}' | HOME="$H" CLAUDE_NOTIFY_FORCE=1 bash "$N" limit >/dev/null 2>&1
-check "$(cat "$H/.claude/claude-limit-reset")" "$before" "the pending reset is left alone"
+echo "  (it reads the real reset times out of the session data)"
+future=$(( $(date +%s) + 4000 ))
+printf '{"model":{"display_name":"Opus"},"workspace":{"current_dir":"/x/proj"},"rate_limits":{"five_hour":{"used_percentage":43.5,"resets_at":%s},"seven_day":{"used_percentage":12,"resets_at":%s}}}' \
+  "$future" "$(( future + 90000 ))" | HOME="$H" bash "$SL" > "$H/bar.txt" 2>/dev/null
+[ -f "$H/.claude/claude-limits.json" ] && ok "the reset times were saved" || bad "nothing was saved"
+check "$(sed -n 's/^five_hour_resets_at=//p' "$H/.claude/claude-limits.json")" "$future" "the five hour reset was recorded"
+check "$(sed -n 's/^five_hour_used=//p' "$H/.claude/claude-limits.json")" "43.5" "usage was recorded too"
+grep -q '43% used' "$H/bar.txt" && ok "the bar shows usage" || bad "the bar is missing usage: $(cat "$H/bar.txt")"
 
-echo "  (the watcher fires when the time passes)"
-pkill -f "claude-notify.sh watch" 2>/dev/null || true
+echo "  (nothing fires while the reset is still ahead)"
+before=$(cat "$H/.claude/claude-notify.log" 2>/dev/null | wc -l | tr -d " ")
 rm -f "$H/.claude/claude-watch-alive"
-printf '%s|estimated\n' "$(date +%s)" > "$H/.claude/claude-limit-reset"
-rm -f "${TMPDIR:-/tmp}"/claude-notify.*.last
-( HOME="$H" bash "$N" watch >/dev/null 2>&1 & )
-wait_for 30 "grep -q 'kind=limit-reset' '$H/.claude/claude-notify.log' 2>/dev/null" \
-  && ok "a limit-reset alert was recorded" || bad "no limit-reset alert"
-[ -f "$H/.claude/claude-limit-reset" ] && bad "the schedule was not cleared" || ok "fired and cleared the schedule"
-grep -q 'probably reset' "$H/.claude/claude-notify.log" && ok "the wording admits it is an estimate" || bad "the estimate is not admitted"
-pkill -f "claude-notify.sh watch" 2>/dev/null || true
+HOME="$H" timeout 5 bash "$N" watch >/dev/null 2>&1 || true
+after=$(cat "$H/.claude/claude-notify.log" 2>/dev/null | wc -l | tr -d " ")
+check "$after" "$before" "silent until the time arrives"
 
-echo "  (the window opens on the first prompt and does not restart)"
-rm -f "$H/.claude/claude-window-start"
-printf '{"session_id":"w"}' | HOME="$H" bash "$N" mark >/dev/null 2>&1
-[ -f "$H/.claude/claude-window-start" ] && ok "the window opened" || bad "no window was opened"
-opened=$(cat "$H/.claude/claude-window-start")
-sleep 1
-printf '{"session_id":"w"}' | HOME="$H" bash "$N" mark >/dev/null 2>&1
-check "$(cat "$H/.claude/claude-window-start")" "$opened" "a later prompt does not restart the window"
+echo "  (it fires when the reset time passes, with no limit ever hit)"
+past=$(( $(date +%s) - 5 ))
+printf 'updated=%s\nfive_hour_resets_at=%s\nseven_day_resets_at=%s\n' "$(date +%s)" "$past" "$past" \
+  > "$H/.claude/claude-limits.json"
+rm -f "$H/.claude/claude-watch-alive" "${TMPDIR:-/tmp}"/claude-notify.*.last
+HOME="$H" bash "$N" watch >/dev/null 2>&1
+grep -q 'kind=limit-reset' "$H/.claude/claude-notify.log" && ok "the five hour reset fired" || bad "no limit-reset"
+grep -q 'kind=weekly-reset' "$H/.claude/claude-notify.log" && ok "the seven day reset fired too" || bad "no weekly-reset"
+grep -q 'has reset' "$H/.claude/claude-notify.log" && ok "worded as fact, not an estimate" || bad "still worded as an estimate"
 
-echo "  (the window fires without the limit ever being hit)"
-pkill -f "claude-notify.sh watch" 2>/dev/null || true
-rm -f "$H/.claude/claude-watch-alive" "$H/.claude/claude-limit-reset"
-setconf WINDOW_RESET_ENABLED 1
-echo $(( $(date +%s) - 5*3600 - 10 )) > "$H/.claude/claude-window-start"
-rm -f "${TMPDIR:-/tmp}"/claude-notify.*.last
-( HOME="$H" bash "$N" watch >/dev/null 2>&1 & )
-wait_for 30 "grep -q 'kind=window-reset' '$H/.claude/claude-notify.log' 2>/dev/null" \
-  && ok "a window-reset alert was recorded" || bad "no window-reset alert"
-[ -f "$H/.claude/claude-window-start" ] && bad "the window was not cleared" || ok "the window rolled over with no limit involved"
-pkill -f "claude-notify.sh watch" 2>/dev/null || true
+echo "  (each reset is announced once and only once)"
+n1=$(wc -l < "$H/.claude/claude-notify.log")
+rm -f "$H/.claude/claude-watch-alive" "${TMPDIR:-/tmp}"/claude-notify.*.last
+HOME="$H" bash "$N" watch >/dev/null 2>&1
+check "$(wc -l < "$H/.claude/claude-notify.log")" "$n1" "a second pass stays silent"
 
-echo "  (window reset is off by default)"
-setconf WINDOW_RESET_ENABLED 0
-rm -f "${TMPDIR:-/tmp}"/claude-notify.*.last
-r=$(printf '{}' | HOME="$H" CLAUDE_NOTIFY_DEBUG=1 bash "$N" window-reset 2>/dev/null | tr -d '\r')
-case "$r" in *suppressed=muted*) ok "off unless switched on" ;; *) bad "should be off by default: $r" ;; esac
+echo "  (a new reset time is a new announcement)"
+newer=$(( $(date +%s) - 1 ))
+printf 'updated=%s\nfive_hour_resets_at=%s\n' "$(date +%s)" "$newer" > "$H/.claude/claude-limits.json"
+rm -f "$H/.claude/claude-watch-alive" "${TMPDIR:-/tmp}"/claude-notify.*.last
+HOME="$H" bash "$N" watch >/dev/null 2>&1
+[ "$(wc -l < "$H/.claude/claude-notify.log")" -gt "$n1" ] && ok "the next window is announced" || bad "a new reset was missed"
+
+echo "  (a status line you already had is never overwritten)"
+"$PY" - "$H/.claude/settings.json" <<'PYEOF'
+import json, sys
+d = json.load(open(sys.argv[1], encoding='utf-8-sig'))
+d['statusLine'] = {'type': 'command', 'command': 'my-own-bar.sh'}
+json.dump(d, open(sys.argv[1], 'w', encoding='utf-8'), indent=2)
+PYEOF
+HOME="$H" NO_TEST_TONE=1 NONINTERACTIVE=1 bash "$INSTALLER" >/dev/null 2>&1
+grep -q 'my-own-bar.sh' "$H/.claude/settings.json" && ok "yours is left alone" || bad "yours was overwritten"
+HOME="$H" bash "$INSTALLER" --uninstall >/dev/null 2>&1
+grep -q 'my-own-bar.sh' "$H/.claude/settings.json" && ok "and survives uninstall" || bad "uninstall removed yours"
 
 unset CLAUDE_NOTIFY_DRYRUN
 rm -rf "$H"

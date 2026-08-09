@@ -21,6 +21,7 @@
 #    ~/.claude/claude-notify.sh     created / overwritten
 #    ~/.claude/claude-notify.conf   created if absent, never overwritten
 #    ~/.claude/claude-sounds/       the bundled alert sounds
+#    ~/.claude/claude-sounds-statusline.sh   reads your limit reset times
 #    ~/.claude/settings.json        backed up, then hook entries added
 #
 #  SAFE TO RE-RUN. It replaces its own hook entries and leaves everything
@@ -39,6 +40,7 @@ NOTIFY_SCRIPT="$CLAUDE_DIR/claude-notify.sh"
 CONF_FILE="$CLAUDE_DIR/claude-notify.conf"
 SOUND_DIR="$CLAUDE_DIR/claude-sounds"
 CLI_SCRIPT="$CLAUDE_DIR/claude-sounds-cli"
+STATUSLINE_SCRIPT="$CLAUDE_DIR/claude-sounds-statusline.sh"
 SETTINGS="$CLAUDE_DIR/settings.json"
 MARKER="claude-notify.sh"    # how we recognise our own hook entries
 
@@ -75,7 +77,7 @@ PROJECT_PITCH=1
 SPEAK=0
 TOAST_ON_DONE=0
 DEBOUNCE_SECONDS=2
-ALWAYS_ALERT="blocked,limit,error,limit-reset,window-reset"
+ALWAYS_ALERT="blocked,limit,error,limit-reset,weekly-reset"
 MUTE=""
 QUIET_HOURS=""
 MUTE_UNTIL=""
@@ -268,8 +270,9 @@ ERROR_VOLUME=$ERROR_VOLUME
 ERROR_PATTERN=2
 ERROR_SOUND=
 
-# How long a usage window lasts, in hours. Also how far ahead the limit reset is
-# estimated until a real rate limit message can be parsed.
+# Only used as a fallback. The status line records the real reset time straight
+# from Claude Code, and that always wins. This is how far ahead to guess if you
+# hit the limit before the status line ever ran.
 WINDOW_HOURS=5
 
 LIMIT_RESET_ENABLED=1
@@ -277,12 +280,12 @@ LIMIT_RESET_VOLUME=100
 LIMIT_RESET_PATTERN=2x180
 LIMIT_RESET_SOUND=
 
-# Off by default: most people only care about being unblocked, not about the
-# window rolling over when they never hit the limit.
-WINDOW_RESET_ENABLED=0
-WINDOW_RESET_VOLUME=70
-WINDOW_RESET_PATTERN=1
-WINDOW_RESET_SOUND=
+# The seven day limit resetting. Rare, so it is on: you will hear it about once
+# a week and it is genuinely worth knowing.
+WEEKLY_RESET_ENABLED=1
+WEEKLY_RESET_VOLUME=70
+WEEKLY_RESET_PATTERN=1
+WEEKLY_RESET_SOUND=
 EOF
 }
 
@@ -406,8 +409,31 @@ with open(settings_path, 'w', encoding='utf-8') as f:
 PYEOF
 
 if [ "$MODE" = "uninstall" ]; then
-  rm -f "$NOTIFY_SCRIPT" "$CLI_SCRIPT"
+  rm -f "$NOTIFY_SCRIPT" "$CLI_SCRIPT" "$STATUSLINE_SCRIPT"
+  rm -f "$CLAUDE_DIR/claude-limits.json" "$CLAUDE_DIR/claude-reset-fired" \
+        "$CLAUDE_DIR/claude-limit-reset" "$CLAUDE_DIR/claude-watch-alive" \
+        "$CLAUDE_DIR/claude-notify-pending"
   rm -rf "$SOUND_DIR"
+
+  # Only unregister the status line if it is still ours. Someone who replaced it
+  # with their own since installing should keep theirs.
+  CLAUDE_SETTINGS="$SETTINGS" "$PY" <<'PYEOF' || true
+import json, os
+
+path = os.environ['CLAUDE_SETTINGS']
+try:
+    with open(path, encoding='utf-8-sig') as f:
+        settings = json.load(f)
+except Exception:
+    raise SystemExit(0)
+
+sl = settings.get('statusLine')
+if isinstance(sl, dict) and 'claude-sounds-statusline' in str(sl.get('command', '')):
+    settings.pop('statusLine', None)
+    with open(path, 'w', encoding='utf-8') as f:
+        json.dump(settings, f, indent=2)
+        f.write('\n')
+PYEOF
   ok "removed. restart Claude Code."
   dim "left $(basename "$CONF_FILE") in place, in case you reinstall"
   printf '\n'
@@ -415,6 +441,50 @@ if [ "$MODE" = "uninstall" ]; then
 fi
 
 ok "wired 5 hooks into settings.json"
+
+# Registering the status line is the one change here that is visible in your
+# terminal, and people configure their own. So it is only set when there is none
+# already: an existing one is left completely alone and the instructions for
+# adding a line to it are printed instead.
+sl_state=$(CLAUDE_SETTINGS="$SETTINGS" CLAUDE_SL="$STATUSLINE_SCRIPT" "$PY" <<'PYEOF'
+import json, os
+
+path = os.environ['CLAUDE_SETTINGS']
+script = os.environ['CLAUDE_SL']
+
+try:
+    with open(path, encoding='utf-8-sig') as f:
+        settings = json.load(f)
+except Exception:
+    raise SystemExit(0)
+
+existing = settings.get('statusLine')
+if isinstance(existing, dict) and existing.get('command'):
+    if 'claude-sounds-statusline' in str(existing.get('command')):
+        print('same')
+    else:
+        print('other')
+    raise SystemExit(0)
+
+settings['statusLine'] = {
+    'type': 'command',
+    'command': '"%s"' % script,
+    'padding': 0,
+}
+with open(path, 'w', encoding='utf-8') as f:
+    json.dump(settings, f, indent=2)
+    f.write('\n')
+print('added')
+PYEOF
+)
+case "$sl_state" in
+  added) ok "registered the status line" ;;
+  same)  step "status line already points here" ;;
+  other) step "you already have a status line, so it was left alone"
+         dim "the reset alerts need it, so add this to your own script:"
+         dim "  \"$STATUSLINE_SCRIPT\" >/dev/null" ;;
+  *)     step "could not register the status line" ;;
+esac
 
 # ----------------------------------------------------- the notifier script ---
 
@@ -433,6 +503,17 @@ cat > "$CLI_SCRIPT" <<'CLIEOF'
 CLIEOF
 chmod +x "$CLI_SCRIPT"
 ok "wrote $(basename "$CLI_SCRIPT")"
+
+# --------------------------------------------------------- the status line ---
+# This is what makes the reset alerts possible. Claude Code hands the status
+# line the real figures from Anthropic, including when your five hour and seven
+# day limits reset, and drawing that bar costs nothing because it happens
+# anyway. The script saves those times so the notifier can alert when they pass.
+cat > "$STATUSLINE_SCRIPT" <<'STATUSLINEEOF'
+@@STATUSLINE@@
+STATUSLINEEOF
+chmod +x "$STATUSLINE_SCRIPT"
+ok "wrote $(basename "$STATUSLINE_SCRIPT")"
 
 # ------------------------------------------------------------ the sounds ---
 # Written out from the base64 block at the end of this file, so a machine with

@@ -21,6 +21,7 @@
 #    ~/.claude/claude-notify.sh     created / overwritten
 #    ~/.claude/claude-notify.conf   created if absent, never overwritten
 #    ~/.claude/claude-sounds/       the bundled alert sounds
+#    ~/.claude/claude-sounds-statusline.sh   reads your limit reset times
 #    ~/.claude/settings.json        backed up, then hook entries added
 #
 #  SAFE TO RE-RUN. It replaces its own hook entries and leaves everything
@@ -39,6 +40,7 @@ NOTIFY_SCRIPT="$CLAUDE_DIR/claude-notify.sh"
 CONF_FILE="$CLAUDE_DIR/claude-notify.conf"
 SOUND_DIR="$CLAUDE_DIR/claude-sounds"
 CLI_SCRIPT="$CLAUDE_DIR/claude-sounds-cli"
+STATUSLINE_SCRIPT="$CLAUDE_DIR/claude-sounds-statusline.sh"
 SETTINGS="$CLAUDE_DIR/settings.json"
 MARKER="claude-notify.sh"    # how we recognise our own hook entries
 
@@ -75,7 +77,7 @@ PROJECT_PITCH=1
 SPEAK=0
 TOAST_ON_DONE=0
 DEBOUNCE_SECONDS=2
-ALWAYS_ALERT="blocked,limit,error,limit-reset,window-reset"
+ALWAYS_ALERT="blocked,limit,error,limit-reset,weekly-reset"
 MUTE=""
 QUIET_HOURS=""
 MUTE_UNTIL=""
@@ -268,8 +270,9 @@ ERROR_VOLUME=$ERROR_VOLUME
 ERROR_PATTERN=2
 ERROR_SOUND=
 
-# How long a usage window lasts, in hours. Also how far ahead the limit reset is
-# estimated until a real rate limit message can be parsed.
+# Only used as a fallback. The status line records the real reset time straight
+# from Claude Code, and that always wins. This is how far ahead to guess if you
+# hit the limit before the status line ever ran.
 WINDOW_HOURS=5
 
 LIMIT_RESET_ENABLED=1
@@ -277,12 +280,12 @@ LIMIT_RESET_VOLUME=100
 LIMIT_RESET_PATTERN=2x180
 LIMIT_RESET_SOUND=
 
-# Off by default: most people only care about being unblocked, not about the
-# window rolling over when they never hit the limit.
-WINDOW_RESET_ENABLED=0
-WINDOW_RESET_VOLUME=70
-WINDOW_RESET_PATTERN=1
-WINDOW_RESET_SOUND=
+# The seven day limit resetting. Rare, so it is on: you will hear it about once
+# a week and it is genuinely worth knowing.
+WEEKLY_RESET_ENABLED=1
+WEEKLY_RESET_VOLUME=70
+WEEKLY_RESET_PATTERN=1
+WEEKLY_RESET_SOUND=
 EOF
 }
 
@@ -406,8 +409,31 @@ with open(settings_path, 'w', encoding='utf-8') as f:
 PYEOF
 
 if [ "$MODE" = "uninstall" ]; then
-  rm -f "$NOTIFY_SCRIPT" "$CLI_SCRIPT"
+  rm -f "$NOTIFY_SCRIPT" "$CLI_SCRIPT" "$STATUSLINE_SCRIPT"
+  rm -f "$CLAUDE_DIR/claude-limits.json" "$CLAUDE_DIR/claude-reset-fired" \
+        "$CLAUDE_DIR/claude-limit-reset" "$CLAUDE_DIR/claude-watch-alive" \
+        "$CLAUDE_DIR/claude-notify-pending"
   rm -rf "$SOUND_DIR"
+
+  # Only unregister the status line if it is still ours. Someone who replaced it
+  # with their own since installing should keep theirs.
+  CLAUDE_SETTINGS="$SETTINGS" "$PY" <<'PYEOF' || true
+import json, os
+
+path = os.environ['CLAUDE_SETTINGS']
+try:
+    with open(path, encoding='utf-8-sig') as f:
+        settings = json.load(f)
+except Exception:
+    raise SystemExit(0)
+
+sl = settings.get('statusLine')
+if isinstance(sl, dict) and 'claude-sounds-statusline' in str(sl.get('command', '')):
+    settings.pop('statusLine', None)
+    with open(path, 'w', encoding='utf-8') as f:
+        json.dump(settings, f, indent=2)
+        f.write('\n')
+PYEOF
   ok "removed. restart Claude Code."
   dim "left $(basename "$CONF_FILE") in place, in case you reinstall"
   printf '\n'
@@ -415,6 +441,50 @@ if [ "$MODE" = "uninstall" ]; then
 fi
 
 ok "wired 5 hooks into settings.json"
+
+# Registering the status line is the one change here that is visible in your
+# terminal, and people configure their own. So it is only set when there is none
+# already: an existing one is left completely alone and the instructions for
+# adding a line to it are printed instead.
+sl_state=$(CLAUDE_SETTINGS="$SETTINGS" CLAUDE_SL="$STATUSLINE_SCRIPT" "$PY" <<'PYEOF'
+import json, os
+
+path = os.environ['CLAUDE_SETTINGS']
+script = os.environ['CLAUDE_SL']
+
+try:
+    with open(path, encoding='utf-8-sig') as f:
+        settings = json.load(f)
+except Exception:
+    raise SystemExit(0)
+
+existing = settings.get('statusLine')
+if isinstance(existing, dict) and existing.get('command'):
+    if 'claude-sounds-statusline' in str(existing.get('command')):
+        print('same')
+    else:
+        print('other')
+    raise SystemExit(0)
+
+settings['statusLine'] = {
+    'type': 'command',
+    'command': '"%s"' % script,
+    'padding': 0,
+}
+with open(path, 'w', encoding='utf-8') as f:
+    json.dump(settings, f, indent=2)
+    f.write('\n')
+print('added')
+PYEOF
+)
+case "$sl_state" in
+  added) ok "registered the status line" ;;
+  same)  step "status line already points here" ;;
+  other) step "you already have a status line, so it was left alone"
+         dim "the reset alerts need it, so add this to your own script:"
+         dim "  \"$STATUSLINE_SCRIPT\" >/dev/null" ;;
+  *)     step "could not register the status line" ;;
+esac
 
 # ----------------------------------------------------- the notifier script ---
 
@@ -440,7 +510,7 @@ UID_=$(id -u 2>/dev/null || echo 0)
 # Normalise up front, so the per-event option lookups below cannot be fed an
 # arbitrary string from the command line.
 case "$KIND" in
-  mark|done|blocked|limit|error|limit-reset|window-reset|watch) ;;
+  mark|done|blocked|limit|error|limit-reset|weekly-reset|watch) ;;
   *) KIND="done" ;;
 esac
 
@@ -461,7 +531,7 @@ PROJECT_PITCH=$(cfg PROJECT_PITCH 1)
 SPEAK=$(cfg SPEAK 0)
 TOAST_ON_DONE=$(cfg TOAST_ON_DONE 0)
 DEBOUNCE_SECONDS=$(cfg DEBOUNCE_SECONDS 2)
-ALWAYS_ALERT=$(cfg ALWAYS_ALERT "blocked,limit,error,limit-reset,window-reset")
+ALWAYS_ALERT=$(cfg ALWAYS_ALERT "blocked,limit,error,limit-reset,weekly-reset")
 MUTE=$(cfg MUTE "")
 QUIET_HOURS=$(cfg QUIET_HOURS "")
 MUTE_UNTIL=$(cfg MUTE_UNTIL "")
@@ -481,7 +551,7 @@ case "$SOUND_PACK" in ""|*/*|.*) SOUND_PACK="default" ;; esac
 KIND_UC=$(printf '%s' "$KIND" | tr 'a-z-' 'A-Z_')
 EV_ENABLED=$(cfg "${KIND_UC}_ENABLED" 1)
 EV_VOLUME=$(cfg "${KIND_UC}_VOLUME" 100)
-case "$KIND" in window-reset) EV_ENABLED=$(cfg WINDOW_RESET_ENABLED 0) ;; esac
+
 EV_SOUND=$(cfg "${KIND_UC}_SOUND" "")
 
 # How many times to play, and how far apart. "2" means twice at the default
@@ -490,7 +560,7 @@ EV_SOUND=$(cfg "${KIND_UC}_SOUND" "")
 case "$KIND" in
   done) EV_PATTERN=$(cfg "DONE_PATTERN" "1") ;;
   limit-reset)  EV_PATTERN=$(cfg "LIMIT_RESET_PATTERN" "2x180") ;;
-  window-reset) EV_PATTERN=$(cfg "WINDOW_RESET_PATTERN" "1") ;;
+  weekly-reset) EV_PATTERN=$(cfg "WEEKLY_RESET_PATTERN" "1") ;;
   *)    EV_PATTERN=$(cfg "${KIND_UC}_PATTERN" "2") ;;
 esac
 
@@ -551,21 +621,32 @@ record() {
 
 
 # --- waiting for a reset ------------------------------------------------------
-# Two things are worth being told about, and neither can be handled by a hook
-# alone, because a hook exits the moment it finishes:
+# Claude Code hands the status line the real figures, straight from Anthropic:
 #
-#   limit-reset   you were blocked, and now you are not
-#   window-reset  the usage window rolled over, whether or not you hit it
+#   "rate_limits": { "five_hour": { "used_percentage": .., "resets_at": .. },
+#                    "seven_day": { .. } }
 #
-# So the notifier schedules a time in a file and starts a copy of itself in the
-# background to watch the clock. No daemon to install, and it works whether or
-# not the desktop app is present.
+# The status line script saves those to claude-limits.json. Because they come
+# from the server they already account for every surface you use, so this does
+# not care whether the usage came from this terminal, the web, a phone or
+# another machine. It also does not care whether you ever hit the limit: the
+# reset time is there at 5% just as much as at 100%.
+#
+# A hook cannot wait for that moment, since it exits as soon as it finishes, so
+# the notifier starts a copy of itself in the background to watch the clock. No
+# daemon to install, and no dependency on the desktop app.
+LIMITS_FILE="$HOME/.claude/claude-limits.json"
 LIMIT_RESET_AT="$HOME/.claude/claude-limit-reset"
-WINDOW_START_AT="$HOME/.claude/claude-window-start"
+FIRED_FILE="$HOME/.claude/claude-reset-fired"
 WATCH_ALIVE="$HOME/.claude/claude-watch-alive"
 
+limits_get() {  # limits_get <key>
+  [ -f "$LIMITS_FILE" ] || return 0
+  sed -n "s/^$1=//p" "$LIMITS_FILE" 2>/dev/null | tail -1 | tr -d '\r'
+}
+
 # The watcher touches this every tick. Anything recent means one is already
-# running, so a second is not started. Far simpler than tracking a pid, and it
+# running, so a second is not started. Simpler than tracking a pid, and it
 # self-heals if a watcher is killed.
 watcher_running() {
   [ -f "$WATCH_ALIVE" ] || return 1
@@ -581,6 +662,19 @@ start_watcher() {
   ( nohup "$0" watch >/dev/null 2>&1 & ) 2>/dev/null || true
 }
 
+# Alert once per reset, never twice. The reset timestamp itself is the identity:
+# once a given resets_at has been announced, a later tick that still sees the
+# same number stays quiet.
+already_fired() {  # already_fired <window> <timestamp>
+  [ -f "$FIRED_FILE" ] || return 1
+  grep -qx "$1=$2" "$FIRED_FILE" 2>/dev/null
+}
+
+mark_fired() {  # mark_fired <window> <timestamp>
+  { grep -v "^$1=" "$FIRED_FILE" 2>/dev/null; printf '%s=%s\n' "$1" "$2"; } \
+    > "$FIRED_FILE.tmp" 2>/dev/null && mv "$FIRED_FILE.tmp" "$FIRED_FILE" 2>/dev/null
+}
+
 # The loop. Wakes once a minute rather than sleeping until the target: a laptop
 # that suspends would make a long sleep fire late by however long the lid was
 # shut, whereas comparing against an absolute time self-corrects on wake.
@@ -589,28 +683,53 @@ if [ "$KIND" = "watch" ]; then
     date +%s > "$WATCH_ALIVE" 2>/dev/null || true
     now=$(date +%s)
     pending=0
+    fired_this_tick=0
 
-    if [ -f "$LIMIT_RESET_AT" ]; then
-      target=$(cut -d'|' -f1 < "$LIMIT_RESET_AT" 2>/dev/null)
-      case "$target" in
-        ''|*[!0-9]*) rm -f "$LIMIT_RESET_AT" ;;
-        *) if [ "$now" -ge "$target" ]; then
-             estimated=$(cut -d'|' -f2 < "$LIMIT_RESET_AT" 2>/dev/null)
-             rm -f "$LIMIT_RESET_AT"
-             CLAUDE_NOTIFY_ESTIMATED="$estimated" "$0" limit-reset </dev/null >/dev/null 2>&1 || true
-           else pending=1; fi ;;
-      esac
+    # The real five hour window, from the status line.
+    five=$(limits_get five_hour_resets_at)
+    case "$five" in
+      ''|*[!0-9]*) ;;
+      *) if [ "$now" -ge "$five" ]; then
+           if ! already_fired five_hour "$five"; then
+             mark_fired five_hour "$five"
+             "$0" limit-reset </dev/null >/dev/null 2>&1 || true
+             fired_this_tick=1
+           fi
+         else pending=1; fi ;;
+    esac
+
+    # The seven day window, same mechanism. Both windows can come due in the
+    # same tick, and the debounce exists to stop a stutter of identical alerts
+    # rather than to hide a different one, so the second is given room.
+    if [ "$fired_this_tick" = "1" ]; then
+      sleep "$(( DEBOUNCE_SECONDS + 1 ))"
     fi
+    week=$(limits_get seven_day_resets_at)
+    case "$week" in
+      ''|*[!0-9]*) ;;
+      *) if [ "$now" -ge "$week" ]; then
+           if ! already_fired seven_day "$week"; then
+             mark_fired seven_day "$week"
+             "$0" weekly-reset </dev/null >/dev/null 2>&1 || true
+           fi
+         else pending=1; fi ;;
+    esac
 
-    if [ -f "$WINDOW_START_AT" ]; then
-      started=$(cat "$WINDOW_START_AT" 2>/dev/null)
-      case "$started" in
-        ''|*[!0-9]*) rm -f "$WINDOW_START_AT" ;;
-        *) if [ "$now" -ge $(( started + WINDOW_HOURS * 3600 )) ]; then
-             rm -f "$WINDOW_START_AT"
-             "$0" window-reset </dev/null >/dev/null 2>&1 || true
-           else pending=1; fi ;;
-      esac
+    # The estimate, used only when hitting the limit produced no real figure.
+    # Dropped as soon as the status line supplies one.
+    if [ -f "$LIMIT_RESET_AT" ]; then
+      if [ -n "$five" ]; then
+        rm -f "$LIMIT_RESET_AT"
+      else
+        target=$(cut -d'|' -f1 < "$LIMIT_RESET_AT" 2>/dev/null)
+        case "$target" in
+          ''|*[!0-9]*) rm -f "$LIMIT_RESET_AT" ;;
+          *) if [ "$now" -ge "$target" ]; then
+               rm -f "$LIMIT_RESET_AT"
+               CLAUDE_NOTIFY_ESTIMATED=estimated "$0" limit-reset </dev/null >/dev/null 2>&1 || true
+             else pending=1; fi ;;
+        esac
+      fi
     fi
 
     [ "$pending" = "1" ] || break
@@ -673,22 +792,11 @@ fi
 if [ "$KIND" = "mark" ]; then
   date +%s > "$STARTFILE" 2>/dev/null || true
 
-  # The usage window opens with the first prompt after the last one expired.
-  # Recorded here rather than when the limit is hit, because the window rolls
-  # over whether or not you ever reached the limit.
-  if [ -d "$HOME/.claude" ]; then
-    open_window=1
-    if [ -f "$WINDOW_START_AT" ]; then
-      was=$(cat "$WINDOW_START_AT" 2>/dev/null)
-      case "$was" in
-        ''|*[!0-9]*) ;;
-        *) [ "$(date +%s)" -lt $(( was + WINDOW_HOURS * 3600 )) ] && open_window=0 ;;
-      esac
-    fi
-    if [ "$open_window" = "1" ]; then
-      { date +%s > "$WINDOW_START_AT"; } 2>/dev/null || true
-      start_watcher
-    fi
+  # Nothing to schedule here any more: the status line records the real reset
+  # times. This only makes sure something is watching them, since the watcher
+  # exits once nothing is pending.
+  if [ -n "$(limits_get five_hour_resets_at)$(limits_get seven_day_resets_at)" ]; then
+    start_watcher
   fi
 
   record "kind=mark session=$SESSION"
@@ -895,12 +1003,12 @@ case "$KIND" in
       FALLBACK="Your usage limit has reset."
     fi
     ;;
-  window-reset)
+  weekly-reset)
     BUNDLED_SOUNDS="chime-mid chime-soft"
     MAC_SOUNDS="Ping Glass Hero"
     FD_SOUNDS="message complete bell"
-    TITLE="New usage window"
-    FALLBACK="Your ${WINDOW_HOURS} hour window has rolled over."
+    TITLE="Weekly limit reset"
+    FALLBACK="Your seven day limit has reset."
     ;;
   limit)
     BUNDLED_SOUNDS="alert-limit"
@@ -1429,6 +1537,122 @@ esac
 CLIEOF
 chmod +x "$CLI_SCRIPT"
 ok "wrote $(basename "$CLI_SCRIPT")"
+
+# --------------------------------------------------------- the status line ---
+# This is what makes the reset alerts possible. Claude Code hands the status
+# line the real figures from Anthropic, including when your five hour and seven
+# day limits reset, and drawing that bar costs nothing because it happens
+# anyway. The script saves those times so the notifier can alert when they pass.
+cat > "$STATUSLINE_SCRIPT" <<'STATUSLINEEOF'
+#!/usr/bin/env bash
+# =============================================================================
+#  Claude Code sound alerts - status line
+# =============================================================================
+#
+#  Claude Code runs this to draw the bar at the bottom of the terminal, handing
+#  it session data on stdin. That data includes the one thing this project could
+#  not otherwise know:
+#
+#      "rate_limits": {
+#        "five_hour": { "used_percentage": 23.5, "resets_at": 1738425600 },
+#        "seven_day": { "used_percentage": 41.2, "resets_at": 1738857600 }
+#      }
+#
+#  Those numbers come from Anthropic, so they already account for every surface
+#  you use: this terminal, the web, the phone, another machine. Reading them
+#  costs nothing, because Claude Code draws this bar regardless.
+#
+#  So this script does two jobs:
+#
+#    1. print a status line, which is what Claude Code asked for
+#    2. save the reset times, so the notifier can alert when they pass
+#
+#  It must stay quick and it must never fail loudly: it runs constantly, and a
+#  broken status line is a broken looking editor.
+# =============================================================================
+
+LIMITS="$HOME/.claude/claude-limits.json"
+NOTIFIER="$HOME/.claude/claude-notify.sh"
+
+payload=$(cat 2>/dev/null)
+[ -n "$payload" ] || exit 0
+
+# Pulled out with grep rather than a JSON parser on purpose. This runs on every
+# redraw, so starting an interpreter each time would be felt. The shape here is
+# flat and known, and anything unexpected simply yields an empty string.
+field() {  # field <window> <key>
+  printf '%s' "$payload" \
+    | grep -o "\"$1\"[[:space:]]*:[[:space:]]*{[^}]*}" \
+    | grep -o "\"$2\"[[:space:]]*:[[:space:]]*[0-9.]*" \
+    | grep -o '[0-9.]*$' \
+    | head -1
+}
+
+five_pct=$(field five_hour used_percentage)
+five_at=$(field five_hour resets_at)
+week_pct=$(field seven_day used_percentage)
+week_at=$(field seven_day resets_at)
+
+# --- save what was learned ----------------------------------------------------
+# Written whenever a reset time is present, so the notifier has something to
+# watch even after Claude Code closes. A plain file of key=value, for the same
+# reason the config is: anything can read it without a parser.
+if [ -n "$five_at" ] && [ -d "$HOME/.claude" ]; then
+  {
+    printf 'updated=%s\n' "$(date +%s)"
+    printf 'five_hour_resets_at=%s\n' "$five_at"
+    [ -n "$five_pct" ]  && printf 'five_hour_used=%s\n' "$five_pct"
+    [ -n "$week_at" ]   && printf 'seven_day_resets_at=%s\n' "$week_at"
+    [ -n "$week_pct" ]  && printf 'seven_day_used=%s\n' "$week_pct"
+  } > "$LIMITS.tmp" 2>/dev/null && mv "$LIMITS.tmp" "$LIMITS" 2>/dev/null
+
+  # Make sure something is watching the clock. The notifier's watcher exits once
+  # nothing is pending, so it needs starting again whenever a new reset appears.
+  if [ -x "$NOTIFIER" ]; then
+    alive="$HOME/.claude/claude-watch-alive"
+    running=0
+    if [ -f "$alive" ]; then
+      last=$(cat "$alive" 2>/dev/null)
+      case "$last" in
+        ''|*[!0-9]*) ;;
+        *) [ $(( $(date +%s) - last )) -lt 150 ] && running=1 ;;
+      esac
+    fi
+    [ "$running" = "0" ] && ( nohup "$NOTIFIER" watch >/dev/null 2>&1 & ) 2>/dev/null
+  fi
+fi
+
+# --- draw the bar -------------------------------------------------------------
+# Only installed when there was no status line already, so it has to be useful
+# on its own rather than assuming someone will style it.
+model=$(printf '%s' "$payload" \
+  | grep -o '"display_name"[[:space:]]*:[[:space:]]*"[^"]*"' \
+  | head -1 | sed 's/.*"\([^"]*\)"$/\1/')
+dir=$(printf '%s' "$payload" \
+  | grep -o '"current_dir"[[:space:]]*:[[:space:]]*"[^"]*"' \
+  | head -1 | sed 's/.*"\(.*\)"$/\1/')
+dir=${dir##*[\\/]}
+
+# Local clock time from an epoch, on either GNU or BSD date.
+clock() {
+  date -d "@$1" +%H:%M 2>/dev/null || date -r "$1" +%H:%M 2>/dev/null
+}
+
+out=""
+[ -n "$model" ] && out="$model"
+[ -n "$dir" ] && out="${out:+$out · }$dir"
+
+if [ -n "$five_pct" ] && [ -n "$five_at" ]; then
+  # Rounded to whole percent: the decimal is noise at a glance.
+  pct=${five_pct%%.*}
+  at=$(clock "$five_at")
+  out="${out:+$out · }${pct}% used${at:+, resets $at}"
+fi
+
+printf '%s\n' "$out"
+STATUSLINEEOF
+chmod +x "$STATUSLINE_SCRIPT"
+ok "wrote $(basename "$STATUSLINE_SCRIPT")"
 
 # ------------------------------------------------------------ the sounds ---
 # Written out from the base64 block at the end of this file, so a machine with

@@ -19,7 +19,7 @@ UID_=$(id -u 2>/dev/null || echo 0)
 # Normalise up front, so the per-event option lookups below cannot be fed an
 # arbitrary string from the command line.
 case "$KIND" in
-  mark|done|blocked|limit|error|limit-reset|window-reset|watch) ;;
+  mark|done|blocked|limit|error|limit-reset|weekly-reset|watch) ;;
   *) KIND="done" ;;
 esac
 
@@ -40,7 +40,7 @@ PROJECT_PITCH=$(cfg PROJECT_PITCH 1)
 SPEAK=$(cfg SPEAK 0)
 TOAST_ON_DONE=$(cfg TOAST_ON_DONE 0)
 DEBOUNCE_SECONDS=$(cfg DEBOUNCE_SECONDS 2)
-ALWAYS_ALERT=$(cfg ALWAYS_ALERT "blocked,limit,error,limit-reset,window-reset")
+ALWAYS_ALERT=$(cfg ALWAYS_ALERT "blocked,limit,error,limit-reset,weekly-reset")
 MUTE=$(cfg MUTE "")
 QUIET_HOURS=$(cfg QUIET_HOURS "")
 MUTE_UNTIL=$(cfg MUTE_UNTIL "")
@@ -60,7 +60,7 @@ case "$SOUND_PACK" in ""|*/*|.*) SOUND_PACK="default" ;; esac
 KIND_UC=$(printf '%s' "$KIND" | tr 'a-z-' 'A-Z_')
 EV_ENABLED=$(cfg "${KIND_UC}_ENABLED" 1)
 EV_VOLUME=$(cfg "${KIND_UC}_VOLUME" 100)
-case "$KIND" in window-reset) EV_ENABLED=$(cfg WINDOW_RESET_ENABLED 0) ;; esac
+
 EV_SOUND=$(cfg "${KIND_UC}_SOUND" "")
 
 # How many times to play, and how far apart. "2" means twice at the default
@@ -69,7 +69,7 @@ EV_SOUND=$(cfg "${KIND_UC}_SOUND" "")
 case "$KIND" in
   done) EV_PATTERN=$(cfg "DONE_PATTERN" "1") ;;
   limit-reset)  EV_PATTERN=$(cfg "LIMIT_RESET_PATTERN" "2x180") ;;
-  window-reset) EV_PATTERN=$(cfg "WINDOW_RESET_PATTERN" "1") ;;
+  weekly-reset) EV_PATTERN=$(cfg "WEEKLY_RESET_PATTERN" "1") ;;
   *)    EV_PATTERN=$(cfg "${KIND_UC}_PATTERN" "2") ;;
 esac
 
@@ -130,21 +130,32 @@ record() {
 
 
 # --- waiting for a reset ------------------------------------------------------
-# Two things are worth being told about, and neither can be handled by a hook
-# alone, because a hook exits the moment it finishes:
+# Claude Code hands the status line the real figures, straight from Anthropic:
 #
-#   limit-reset   you were blocked, and now you are not
-#   window-reset  the usage window rolled over, whether or not you hit it
+#   "rate_limits": { "five_hour": { "used_percentage": .., "resets_at": .. },
+#                    "seven_day": { .. } }
 #
-# So the notifier schedules a time in a file and starts a copy of itself in the
-# background to watch the clock. No daemon to install, and it works whether or
-# not the desktop app is present.
+# The status line script saves those to claude-limits.json. Because they come
+# from the server they already account for every surface you use, so this does
+# not care whether the usage came from this terminal, the web, a phone or
+# another machine. It also does not care whether you ever hit the limit: the
+# reset time is there at 5% just as much as at 100%.
+#
+# A hook cannot wait for that moment, since it exits as soon as it finishes, so
+# the notifier starts a copy of itself in the background to watch the clock. No
+# daemon to install, and no dependency on the desktop app.
+LIMITS_FILE="$HOME/.claude/claude-limits.json"
 LIMIT_RESET_AT="$HOME/.claude/claude-limit-reset"
-WINDOW_START_AT="$HOME/.claude/claude-window-start"
+FIRED_FILE="$HOME/.claude/claude-reset-fired"
 WATCH_ALIVE="$HOME/.claude/claude-watch-alive"
 
+limits_get() {  # limits_get <key>
+  [ -f "$LIMITS_FILE" ] || return 0
+  sed -n "s/^$1=//p" "$LIMITS_FILE" 2>/dev/null | tail -1 | tr -d '\r'
+}
+
 # The watcher touches this every tick. Anything recent means one is already
-# running, so a second is not started. Far simpler than tracking a pid, and it
+# running, so a second is not started. Simpler than tracking a pid, and it
 # self-heals if a watcher is killed.
 watcher_running() {
   [ -f "$WATCH_ALIVE" ] || return 1
@@ -160,6 +171,19 @@ start_watcher() {
   ( nohup "$0" watch >/dev/null 2>&1 & ) 2>/dev/null || true
 }
 
+# Alert once per reset, never twice. The reset timestamp itself is the identity:
+# once a given resets_at has been announced, a later tick that still sees the
+# same number stays quiet.
+already_fired() {  # already_fired <window> <timestamp>
+  [ -f "$FIRED_FILE" ] || return 1
+  grep -qx "$1=$2" "$FIRED_FILE" 2>/dev/null
+}
+
+mark_fired() {  # mark_fired <window> <timestamp>
+  { grep -v "^$1=" "$FIRED_FILE" 2>/dev/null; printf '%s=%s\n' "$1" "$2"; } \
+    > "$FIRED_FILE.tmp" 2>/dev/null && mv "$FIRED_FILE.tmp" "$FIRED_FILE" 2>/dev/null
+}
+
 # The loop. Wakes once a minute rather than sleeping until the target: a laptop
 # that suspends would make a long sleep fire late by however long the lid was
 # shut, whereas comparing against an absolute time self-corrects on wake.
@@ -168,28 +192,53 @@ if [ "$KIND" = "watch" ]; then
     date +%s > "$WATCH_ALIVE" 2>/dev/null || true
     now=$(date +%s)
     pending=0
+    fired_this_tick=0
 
-    if [ -f "$LIMIT_RESET_AT" ]; then
-      target=$(cut -d'|' -f1 < "$LIMIT_RESET_AT" 2>/dev/null)
-      case "$target" in
-        ''|*[!0-9]*) rm -f "$LIMIT_RESET_AT" ;;
-        *) if [ "$now" -ge "$target" ]; then
-             estimated=$(cut -d'|' -f2 < "$LIMIT_RESET_AT" 2>/dev/null)
-             rm -f "$LIMIT_RESET_AT"
-             CLAUDE_NOTIFY_ESTIMATED="$estimated" "$0" limit-reset </dev/null >/dev/null 2>&1 || true
-           else pending=1; fi ;;
-      esac
+    # The real five hour window, from the status line.
+    five=$(limits_get five_hour_resets_at)
+    case "$five" in
+      ''|*[!0-9]*) ;;
+      *) if [ "$now" -ge "$five" ]; then
+           if ! already_fired five_hour "$five"; then
+             mark_fired five_hour "$five"
+             "$0" limit-reset </dev/null >/dev/null 2>&1 || true
+             fired_this_tick=1
+           fi
+         else pending=1; fi ;;
+    esac
+
+    # The seven day window, same mechanism. Both windows can come due in the
+    # same tick, and the debounce exists to stop a stutter of identical alerts
+    # rather than to hide a different one, so the second is given room.
+    if [ "$fired_this_tick" = "1" ]; then
+      sleep "$(( DEBOUNCE_SECONDS + 1 ))"
     fi
+    week=$(limits_get seven_day_resets_at)
+    case "$week" in
+      ''|*[!0-9]*) ;;
+      *) if [ "$now" -ge "$week" ]; then
+           if ! already_fired seven_day "$week"; then
+             mark_fired seven_day "$week"
+             "$0" weekly-reset </dev/null >/dev/null 2>&1 || true
+           fi
+         else pending=1; fi ;;
+    esac
 
-    if [ -f "$WINDOW_START_AT" ]; then
-      started=$(cat "$WINDOW_START_AT" 2>/dev/null)
-      case "$started" in
-        ''|*[!0-9]*) rm -f "$WINDOW_START_AT" ;;
-        *) if [ "$now" -ge $(( started + WINDOW_HOURS * 3600 )) ]; then
-             rm -f "$WINDOW_START_AT"
-             "$0" window-reset </dev/null >/dev/null 2>&1 || true
-           else pending=1; fi ;;
-      esac
+    # The estimate, used only when hitting the limit produced no real figure.
+    # Dropped as soon as the status line supplies one.
+    if [ -f "$LIMIT_RESET_AT" ]; then
+      if [ -n "$five" ]; then
+        rm -f "$LIMIT_RESET_AT"
+      else
+        target=$(cut -d'|' -f1 < "$LIMIT_RESET_AT" 2>/dev/null)
+        case "$target" in
+          ''|*[!0-9]*) rm -f "$LIMIT_RESET_AT" ;;
+          *) if [ "$now" -ge "$target" ]; then
+               rm -f "$LIMIT_RESET_AT"
+               CLAUDE_NOTIFY_ESTIMATED=estimated "$0" limit-reset </dev/null >/dev/null 2>&1 || true
+             else pending=1; fi ;;
+        esac
+      fi
     fi
 
     [ "$pending" = "1" ] || break
@@ -252,22 +301,11 @@ fi
 if [ "$KIND" = "mark" ]; then
   date +%s > "$STARTFILE" 2>/dev/null || true
 
-  # The usage window opens with the first prompt after the last one expired.
-  # Recorded here rather than when the limit is hit, because the window rolls
-  # over whether or not you ever reached the limit.
-  if [ -d "$HOME/.claude" ]; then
-    open_window=1
-    if [ -f "$WINDOW_START_AT" ]; then
-      was=$(cat "$WINDOW_START_AT" 2>/dev/null)
-      case "$was" in
-        ''|*[!0-9]*) ;;
-        *) [ "$(date +%s)" -lt $(( was + WINDOW_HOURS * 3600 )) ] && open_window=0 ;;
-      esac
-    fi
-    if [ "$open_window" = "1" ]; then
-      { date +%s > "$WINDOW_START_AT"; } 2>/dev/null || true
-      start_watcher
-    fi
+  # Nothing to schedule here any more: the status line records the real reset
+  # times. This only makes sure something is watching them, since the watcher
+  # exits once nothing is pending.
+  if [ -n "$(limits_get five_hour_resets_at)$(limits_get seven_day_resets_at)" ]; then
+    start_watcher
   fi
 
   record "kind=mark session=$SESSION"
@@ -474,12 +512,12 @@ case "$KIND" in
       FALLBACK="Your usage limit has reset."
     fi
     ;;
-  window-reset)
+  weekly-reset)
     BUNDLED_SOUNDS="chime-mid chime-soft"
     MAC_SOUNDS="Ping Glass Hero"
     FD_SOUNDS="message complete bell"
-    TITLE="New usage window"
-    FALLBACK="Your ${WINDOW_HOURS} hour window has rolled over."
+    TITLE="Weekly limit reset"
+    FALLBACK="Your seven day limit has reset."
     ;;
   limit)
     BUNDLED_SOUNDS="alert-limit"

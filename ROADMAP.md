@@ -118,12 +118,14 @@ does not exist in any form yet. Being told "you can work again" is worth more
 than being told "you are blocked", because the second is obvious the moment it
 happens.
 
-- [ ] Establish where the reset time comes from: parsed from the rate-limit
-      payload if it is there, otherwise an estimate that is labelled as one
+- [x] Establish where the reset time comes from. It is not in the rate limit
+      payload at all: Claude Code hands the status line real figures from
+      Anthropic, including resets_at for both windows, at no token cost
 - [x] Desktop notification at reset, fired by a detached watcher rather than
       the tray, so it works without the app
 - [x] Phone push via ntfy.sh, opt in and off by default (landed in Phase 4)
 - [ ] Countdown in the app and the tray tooltip
+- [ ] Show usage and reset times in claude-sounds status
 - [x] Survive sleep: an absolute timestamp checked once a minute
 - [x] Window reset, separate from limit reset, for windows never exhausted
 
