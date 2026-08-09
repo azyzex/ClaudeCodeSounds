@@ -608,6 +608,11 @@ function Write-Decision {
 # reset time passes. A hook cannot do that itself, because it exits as soon as
 # it finishes, so the notifier starts a copy of itself in the background.
 $limitsFile = Join-Path $env:USERPROFILE '.claude\claude-limits.json'
+# Other surfaces drop their own file in here rather than writing the shared one.
+# Keeping them apart is the point: Claude Code and the browser may be signed
+# into different accounts, and the window is per account, so a merged reset time
+# would be confidently wrong for one of them.
+$limitsDir  = Join-Path $env:USERPROFILE '.claude\claude-limits.d'
 $firedFile  = Join-Path $env:USERPROFILE '.claude\claude-reset-fired'
 $aliveFile  = Join-Path $env:USERPROFILE '.claude\claude-watch-alive'
 $estFile    = Join-Path $env:USERPROFILE '.claude\claude-limit-reset'
@@ -619,6 +624,28 @@ function Get-Limit {
         if ($line -match "^$Key=(.*)$") { return $matches[1].Trim() }
     }
     return ''
+}
+
+function Get-FileValue {
+    param([string]$Path, [string]$Key)
+    if (-not (Test-Path $Path)) { return '' }
+    foreach ($line in (Get-Content $Path)) {
+        if ($line -match "^$Key=(.*)$") { return $matches[1].Trim() }
+    }
+    return ''
+}
+
+# Every file that might hold a reset time: the one Claude Code writes, plus one
+# per other surface that has reported in. Both a missing file and an empty
+# directory are the normal case.
+function Get-LimitSources {
+    $found = @()
+    if (Test-Path $limitsFile) { $found += $limitsFile }
+    if (Test-Path $limitsDir) {
+        $found += (Get-ChildItem -Path $limitsDir -Filter '*.conf' -File `
+                   -ErrorAction SilentlyContinue | ForEach-Object { $_.FullName })
+    }
+    return $found
 }
 
 function Test-AlreadyFired {
@@ -661,30 +688,38 @@ if ($Kind -eq 'watch') {
         $pending = $false
         $firedThisTick = $false
 
-        $five = Get-Limit 'five_hour_resets_at'
-        if ($five -match '^\d+$') {
-            if ($now -ge [int64]$five) {
-                if (-not (Test-AlreadyFired 'five_hour' $five)) {
-                    Set-Fired 'five_hour' $five
-                    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $PSCommandPath -Kind limit-reset *> $null
-                    $firedThisTick = $true
-                }
-            } else { $pending = $true }
-        }
-
-        # Both windows can come due in the same tick, and the debounce exists to
+        # Every source, every window. Two accounts each get their own alert, and
+        # an alert already given is never repeated: the reset timestamp is its
+        # identity, and the account is part of the key so one account cannot
+        # silence another.
+        #
+        # Both windows can come due in the same tick. The debounce exists to
         # stop a stutter of identical alerts rather than to hide a different
-        # one, so the second is given room.
-        if ($firedThisTick) { Start-Sleep -Seconds ((Get-IntOpt 'DEBOUNCE_SECONDS' 2) + 1) }
+        # one, so each is given room.
+        $five = ''
+        foreach ($src in (Get-LimitSources)) {
+            $account = Get-FileValue $src 'account'
+            if (-not $account) { $account = 'local' }
 
-        $week = Get-Limit 'seven_day_resets_at'
-        if ($week -match '^\d+$') {
-            if ($now -ge [int64]$week) {
-                if (-not (Test-AlreadyFired 'seven_day' $week)) {
-                    Set-Fired 'seven_day' $week
-                    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $PSCommandPath -Kind weekly-reset *> $null
-                }
-            } else { $pending = $true }
+            foreach ($window in @('five_hour', 'seven_day')) {
+                $at = Get-FileValue $src "${window}_resets_at"
+                if ($at -notmatch '^\d+$') { continue }
+
+                # Remembered only so the estimate below knows a real figure exists.
+                if ($window -eq 'five_hour') { $five = $at }
+
+                if ($now -ge [int64]$at) {
+                    if (-not (Test-AlreadyFired "$window@$account" $at)) {
+                        Set-Fired "$window@$account" $at
+                        if ($firedThisTick) {
+                            Start-Sleep -Seconds ((Get-IntOpt 'DEBOUNCE_SECONDS' 2) + 1)
+                        }
+                        $reset = if ($window -eq 'five_hour') { 'limit-reset' } else { 'weekly-reset' }
+                        & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $PSCommandPath -Kind $reset *> $null
+                        $firedThisTick = $true
+                    }
+                } else { $pending = $true }
+            }
         }
 
         # The estimate, used only when hitting the limit produced no real
@@ -751,7 +786,7 @@ if ($Kind -eq 'mark') {
     # Nothing to schedule: the status line records the real reset times. This
     # only makes sure something is watching them, since the watcher exits once
     # nothing is pending.
-    if ((Get-Limit 'five_hour_resets_at') -or (Get-Limit 'seven_day_resets_at')) { Start-Watcher }
+    if ((Get-LimitSources).Count -gt 0) { Start-Watcher }
     Write-Decision "kind=mark session=$session"
     exit 0
 }

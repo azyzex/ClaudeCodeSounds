@@ -480,6 +480,63 @@ Remove-Item $h -Recurse -Force -ErrorAction SilentlyContinue
 Write-Host ""
 
 # --------------------------------------------------------------------------
+Write-Host ""
+Write-Host "the watcher counts down from every source, keeping accounts apart"
+
+# There were no watcher tests on Windows at all, which is the platform most of
+# this runs on. The reset alert is the whole point of the project, so it should
+# not be proven only on Unix.
+$h = New-TempHome
+$env:USERPROFILE = $h
+Invoke-Installer -Home_ $h | Out-Null
+$notifier = Join-Path $h '.claude\claude-notify.ps1'
+$logPath  = Join-Path $h '.claude\claude-notify.log'
+$dDir     = Join-Path $h '.claude\claude-limits.d'
+
+function Get-LogLines {
+    if (Test-Path $logPath) { return (Get-Content $logPath | Measure-Object -Line).Lines }
+    return 0
+}
+function Invoke-Watch {
+    Remove-Item (Join-Path $h '.claude\claude-watch-alive') -Force -ErrorAction SilentlyContinue
+    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $notifier -Kind watch *> $null
+}
+
+$past = [int][double]::Parse((Get-Date -UFormat %s)) - 5
+
+Write-Host '  (a reset Claude Code recorded still fires)'
+Set-Content -Path (Join-Path $h '.claude\claude-limits.json') -Encoding ascii -Value @(
+    "updated=$past", "five_hour_resets_at=$past")
+$n0 = Get-LogLines
+Invoke-Watch
+$n1 = Get-LogLines
+Assert ($n1 -gt $n0) "the five hour reset fired"
+
+Write-Host '  (and is announced once, never twice)'
+Invoke-Watch
+Check (Get-LogLines) $n1 "a second pass stays silent"
+
+Write-Host '  (a reset only the browser saw fires too)'
+Remove-Item (Join-Path $h '.claude\claude-limits.json') -Force -ErrorAction SilentlyContinue
+New-Item -ItemType Directory -Force $dDir | Out-Null
+Set-Content -Path (Join-Path $dDir 'web.conf') -Encoding ascii -Value @(
+    "updated=$past", 'source=web', 'account=a1b2c3', "five_hour_resets_at=$past")
+Invoke-Watch
+$n2 = Get-LogLines
+Assert ($n2 -gt $n1) "a reset the browser saw is announced"
+
+Write-Host '  (a second account is a second alert, not a silenced one)'
+# Same window, same instant, different account. Keyed only by the timestamp, the
+# second would look like a repeat and be swallowed.
+Set-Content -Path (Join-Path $dDir 'other.conf') -Encoding ascii -Value @(
+    "updated=$past", 'source=web', 'account=ddeeff', "five_hour_resets_at=$past")
+Invoke-Watch
+Assert ((Get-LogLines) -gt $n2) "the other account is announced too"
+
+Remove-Item $h -Recurse -Force -ErrorAction SilentlyContinue
+Write-Host ""
+
+# --------------------------------------------------------------------------
 Write-Host "passed $script:Pass, failed $script:Fail"
 if ($script:Fail -gt 0) { exit 1 }
 exit 0

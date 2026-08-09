@@ -184,7 +184,15 @@ try:
     _body = io.open(_f, encoding='utf-8').read()
     check('account=a1b2c3d4e5f6' in _body, True, 'records which account it saw')
     check('source=web' in _body, True, 'records which surface saw it')
-    check('five_hour_resets_at=' + GOOD_AT in _body, True, 'keeps the reset time')
+    # Stored as an epoch: the watcher skips anything that is not all digits, so
+    # an ISO string would be written and then silently never fire.
+    _epoch = int((_dt.datetime.now(_dt.timezone.utc)
+                  + _dt.timedelta(hours=2)).timestamp())
+    _line = [l for l in _body.splitlines() if l.startswith('five_hour_resets_at=')]
+    check(len(_line), 1, 'keeps the reset time')
+    _got = _line[0].split('=', 1)[1]
+    check(_got.isdigit(), True, 'stores the reset time as an epoch, not ISO')
+    check(abs(int(_got) - _epoch) < 5, True, 'and it is the right moment')
     check('five_hour_used=93' in _body, True, 'keeps the percentage')
     check('seven_day_used=35' in _body, True, 'keeps the weekly window too')
     # Money is in the response and has no business being on disk.

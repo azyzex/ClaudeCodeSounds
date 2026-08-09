@@ -157,14 +157,28 @@ account identity rule.
 
 ## Phase 5: identity, plumbed through
 
-Once any second source exists:
+**Done, 9 August 2026.**
 
-- `claude-limits.json` becomes keyed by account hash rather than flat
-- The watcher schedules one timer per account
-- Notifications name the account only when more than one is known, so the
-  common case stays quiet
-- Tests cover the case that motivated all of this: two accounts, two windows,
-  two different reset times, and no cross-contamination
+Rather than reshaping the shared file, each surface writes its own into
+`~/.claude/claude-limits.d/`, tagged with the account it saw. The watcher reads
+every one of them, and the fired-already key is `window@account` rather than
+just the window, so one account cannot silence another.
+
+Nothing merges. That was the whole point.
+
+Two things fell out of building it that were not obvious beforehand:
+
+- **The status line is handed an epoch; the web returns an ISO string.** The
+  watcher skips anything non-numeric, so the browser's reading would have been
+  stored successfully and then silently ignored forever. The bridge converts.
+- **`[ -f x ] && printf` inside a function is fatal under `set -e`.** When the
+  shared file was absent the test came out false, took the subshell down with
+  it, and the source list came back empty. The same trap this project has hit
+  before, in a new place.
+
+Both are covered by tests now, on Unix and on Windows. Windows had no watcher
+tests at all before this, which was a poor place to have a coverage gap given it
+is the platform most of this runs on.
 
 ---
 
@@ -178,8 +192,9 @@ Once any second source exists:
 
 ## Known gaps, stated plainly
 
-- A window spent entirely on web or the desktop app is not covered yet
-- The web leg of the bridge has never run end to end
+- A window spent entirely in the Claude desktop app is not covered yet
+- The web leg has never run end to end in a real browser. Every piece is
+  tested, and the chain between them is not
 - A real 5 hour reset has never been observed firing in the wild; the tests
   pass, which is not the same thing
 - The rate limited state of the page has never been captured

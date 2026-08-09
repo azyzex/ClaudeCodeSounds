@@ -11,3 +11,7 @@ h2 { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; opacity:
 .foot { font-size: 10px; opacity: .45; margin: 14px 0 0; }
 .ev { display: flex; justify-content: space-between; font-size: 12px; padding: 3px 0; }
 .ev .when { opacity: .55; }
+
+/* Section heading. Quiet, because the numbers below it are the point. */
+.hd { font-size: 11px; text-transform: uppercase; letter-spacing: .06em;
+      opacity: .5; margin: 10px 0 2px; }

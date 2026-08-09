@@ -146,7 +146,10 @@ def window_or_none(value):
     ahead = (when - datetime.datetime.now(datetime.timezone.utc)).total_seconds()
     if ahead < -3600 or ahead > 8 * 24 * 3600:
         return None
-    return {'used': int(pct), 'resets_at': at}
+    # Stored as a unix epoch, not the ISO string it arrived as. The status line
+    # is handed a number, and the watcher skips anything non-numeric, so an ISO
+    # string here would be written successfully and then silently ignored.
+    return {'used': int(pct), 'resets_at': int(when.timestamp())}
 
 
 def store_limits(message):

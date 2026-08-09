@@ -9,7 +9,45 @@ function ago(at) {
   return new Date(at).toLocaleDateString();
 }
 
+/** How long until a reset, in words. */
+function until(iso) {
+  const ms = new Date(iso).getTime() - Date.now();
+  if (!isFinite(ms)) return null;
+  if (ms <= 0) return 'any moment';
+  const mins = Math.round(ms / 60000);
+  if (mins < 60) return 'in ' + mins + ' min';
+  const hours = Math.floor(mins / 60);
+  const rest = mins % 60;
+  if (hours < 24) return 'in ' + hours + 'h' + (rest ? ' ' + rest + 'm' : '');
+  return 'in ' + Math.round(hours / 24) + ' days';
+}
+
+/** Show the windows, which is the reason the extension exists.
+ *
+ * These numbers come from Anthropic's servers, so they already account for
+ * every surface: this terminal, the web, a phone, another machine.
+ */
+function showLimits(limits) {
+  const host = document.getElementById('limits');
+  if (!host || !limits) return;
+  const rows = [['5 hours', limits.five_hour], ['7 days', limits.seven_day]];
+  host.textContent = '';
+  for (const [name, w] of rows) {
+    if (!w) continue;
+    const row = document.createElement('div');
+    row.className = 'ev';
+    const what = document.createElement('span');
+    what.textContent = name + '  ' + Math.round(w.utilization) + '%';
+    const when = document.createElement('span');
+    when.className = 'when';
+    when.textContent = until(w.resets_at) || '';
+    row.append(what, when);
+    host.append(row);
+  }
+}
+
 chrome.storage.local.get(null).then((s) => {
+  showLimits(s.limits);
   for (const k of KEYS) {
     const el = document.getElementById(k);
     el.checked = Boolean(s[k]);

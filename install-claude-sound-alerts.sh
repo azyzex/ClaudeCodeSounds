@@ -636,9 +636,44 @@ record() {
 # the notifier starts a copy of itself in the background to watch the clock. No
 # daemon to install, and no dependency on the desktop app.
 LIMITS_FILE="$HOME/.claude/claude-limits.json"
+# Other surfaces drop their own file in here rather than writing the shared one.
+# Keeping them apart is the point: Claude Code and the browser may be signed
+# into different accounts, and the window is per account, so a merged reset time
+# would be confidently wrong for one of them.
+LIMITS_DIR="$HOME/.claude/claude-limits.d"
 LIMIT_RESET_AT="$HOME/.claude/claude-limit-reset"
 FIRED_FILE="$HOME/.claude/claude-reset-fired"
 WATCH_ALIVE="$HOME/.claude/claude-watch-alive"
+
+file_get() {  # file_get <file> <key>
+  if [ ! -f "$1" ]; then
+    return 0
+  fi
+  sed -n "s/^$2=//p" "$1" 2>/dev/null | tail -1 | tr -d ''
+}
+
+# Every file that might hold a reset time: the one Claude Code writes, plus one
+# per other surface that has reported in. A missing file and an empty directory
+# are both the normal case.
+#
+# Written as plain ifs rather than `[ -f x ] && printf`. Under set -e a trailing
+# test that comes out false takes the whole subshell down with it, which here
+# would mean an empty list and a countdown that silently never fires.
+limit_sources() {
+  if [ -f "$LIMITS_FILE" ]; then
+    printf '%s
+' "$LIMITS_FILE"
+  fi
+  if [ -d "$LIMITS_DIR" ]; then
+    for f in "$LIMITS_DIR"/*.conf; do
+      if [ -f "$f" ]; then
+        printf '%s
+' "$f"
+      fi
+    done
+  fi
+  return 0
+}
 
 limits_get() {  # limits_get <key>
   [ -f "$LIMITS_FILE" ] || return 0
@@ -685,35 +720,45 @@ if [ "$KIND" = "watch" ]; then
     pending=0
     fired_this_tick=0
 
-    # The real five hour window, from the status line.
-    five=$(limits_get five_hour_resets_at)
-    case "$five" in
-      ''|*[!0-9]*) ;;
-      *) if [ "$now" -ge "$five" ]; then
-           if ! already_fired five_hour "$five"; then
-             mark_fired five_hour "$five"
-             "$0" limit-reset </dev/null >/dev/null 2>&1 || true
-             fired_this_tick=1
-           fi
-         else pending=1; fi ;;
-    esac
+    # Every source, every window. Two accounts each get their own alert, and an
+    # alert already given is never repeated: the reset timestamp is its identity,
+    # and the account is part of the key so one account cannot silence another.
+    #
+    # Both windows can come due in the same tick. The debounce exists to stop a
+    # stutter of identical alerts rather than to hide a different one, so each
+    # is given room.
+    five=""
+    for src in $(limit_sources); do
+      account=$(file_get "$src" account)
+      [ -n "$account" ] || account=local
 
-    # The seven day window, same mechanism. Both windows can come due in the
-    # same tick, and the debounce exists to stop a stutter of identical alerts
-    # rather than to hide a different one, so the second is given room.
-    if [ "$fired_this_tick" = "1" ]; then
-      sleep "$(( DEBOUNCE_SECONDS + 1 ))"
-    fi
-    week=$(limits_get seven_day_resets_at)
-    case "$week" in
-      ''|*[!0-9]*) ;;
-      *) if [ "$now" -ge "$week" ]; then
-           if ! already_fired seven_day "$week"; then
-             mark_fired seven_day "$week"
-             "$0" weekly-reset </dev/null >/dev/null 2>&1 || true
-           fi
-         else pending=1; fi ;;
-    esac
+      for window in five_hour seven_day; do
+        at=$(file_get "$src" "${window}_resets_at")
+        case "$at" in ''|*[!0-9]*) continue ;; esac
+
+        # Remembered only so the estimate below knows a real figure exists.
+        if [ "$window" = "five_hour" ]; then
+          five="$at"
+        fi
+
+        if [ "$now" -ge "$at" ]; then
+          if ! already_fired "$window@$account" "$at"; then
+            mark_fired "$window@$account" "$at"
+            if [ "$fired_this_tick" = "1" ]; then
+              sleep "$(( DEBOUNCE_SECONDS + 1 ))"
+            fi
+            if [ "$window" = "five_hour" ]; then
+              "$0" limit-reset </dev/null >/dev/null 2>&1 || true
+            else
+              "$0" weekly-reset </dev/null >/dev/null 2>&1 || true
+            fi
+            fired_this_tick=1
+          fi
+        else
+          pending=1
+        fi
+      done
+    done
 
     # The estimate, used only when hitting the limit produced no real figure.
     # Dropped as soon as the status line supplies one.

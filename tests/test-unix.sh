@@ -570,6 +570,41 @@ rm -f "$H/.claude/claude-watch-alive" "${TMPDIR:-/tmp}"/claude-notify.*.last
 HOME="$H" bash "$N" watch >/dev/null 2>&1
 [ "$(wc -l < "$H/.claude/claude-notify.log")" -gt "$n1" ] && ok "the next window is announced" || bad "a new reset was missed"
 
+echo "  (other surfaces get their own countdown, kept apart by account)"
+# The browser writes here rather than to the shared file. This is the case that
+# matters: Claude Code signed into one account and the browser into another,
+# where a merged reset time would be confidently wrong for one of them.
+rm -f "$H/.claude/claude-reset-fired" "$H/.claude/claude-limits.json"
+mkdir -p "$H/.claude/claude-limits.d"
+past=$(( $(date +%s) - 5 ))
+printf 'updated=%s
+source=web
+account=a1b2c3
+five_hour_resets_at=%s
+'   "$(date +%s)" "$past" > "$H/.claude/claude-limits.d/web.conf"
+rm -f "$H/.claude/claude-watch-alive" "${TMPDIR:-/tmp}"/claude-notify.*.last
+n0=$(wc -l < "$H/.claude/claude-notify.log")
+HOME="$H" bash "$N" watch >/dev/null 2>&1
+[ "$(wc -l < "$H/.claude/claude-notify.log")" -gt "$n0" ]   && ok "a reset the browser saw is announced" || bad "the browser's reset never fired"
+
+n1=$(wc -l < "$H/.claude/claude-notify.log")
+rm -f "$H/.claude/claude-watch-alive" "${TMPDIR:-/tmp}"/claude-notify.*.last
+HOME="$H" bash "$N" watch >/dev/null 2>&1
+check "$(wc -l < "$H/.claude/claude-notify.log")" "$n1" "and is not repeated"
+
+echo "  (a second account is a second alert, not a silenced one)"
+# Same window, same instant, different account. Keyed only by timestamp, the
+# second would be mistaken for a repeat and swallowed.
+printf 'updated=%s
+source=web
+account=ddeeff
+five_hour_resets_at=%s
+'   "$(date +%s)" "$past" > "$H/.claude/claude-limits.d/other.conf"
+rm -f "$H/.claude/claude-watch-alive" "${TMPDIR:-/tmp}"/claude-notify.*.last
+HOME="$H" bash "$N" watch >/dev/null 2>&1
+[ "$(wc -l < "$H/.claude/claude-notify.log")" -gt "$n1" ]   && ok "the other account is announced too" || bad "one account silenced the other"
+rm -rf "$H/.claude/claude-limits.d"
+
 echo "  (a status line you already had is never overwritten)"
 "$PY" - "$H/.claude/settings.json" <<'PYEOF'
 import json, sys
