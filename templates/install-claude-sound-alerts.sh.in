@@ -75,7 +75,7 @@ PROJECT_PITCH=1
 SPEAK=0
 TOAST_ON_DONE=0
 DEBOUNCE_SECONDS=2
-ALWAYS_ALERT="blocked,limit,error"
+ALWAYS_ALERT="blocked,limit,error,limit-reset,window-reset"
 MUTE=""
 QUIET_HOURS=""
 MUTE_UNTIL=""
@@ -267,6 +267,22 @@ ERROR_ENABLED=1
 ERROR_VOLUME=$ERROR_VOLUME
 ERROR_PATTERN=2
 ERROR_SOUND=
+
+# How long a usage window lasts, in hours. Also how far ahead the limit reset is
+# estimated until a real rate limit message can be parsed.
+WINDOW_HOURS=5
+
+LIMIT_RESET_ENABLED=1
+LIMIT_RESET_VOLUME=100
+LIMIT_RESET_PATTERN=2x180
+LIMIT_RESET_SOUND=
+
+# Off by default: most people only care about being unblocked, not about the
+# window rolling over when they never hit the limit.
+WINDOW_RESET_ENABLED=0
+WINDOW_RESET_VOLUME=70
+WINDOW_RESET_PATTERN=1
+WINDOW_RESET_SOUND=
 EOF
 }
 

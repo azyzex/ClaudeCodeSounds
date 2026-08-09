@@ -120,11 +120,12 @@ happens.
 
 - [ ] Establish where the reset time comes from: parsed from the rate-limit
       payload if it is there, otherwise an estimate that is labelled as one
-- [ ] Desktop notification at reset, fired by the tray process
+- [x] Desktop notification at reset, fired by a detached watcher rather than
+      the tray, so it works without the app
 - [x] Phone push via ntfy.sh, opt in and off by default (landed in Phase 4)
 - [ ] Countdown in the app and the tray tooltip
-- [ ] Survive sleep: store an absolute timestamp and check on wake, rather than
-      relying on a timer
+- [x] Survive sleep: an absolute timestamp checked once a minute
+- [x] Window reset, separate from limit reset, for windows never exhausted
 
 ## Deliberately not doing
 

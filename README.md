@@ -14,6 +14,8 @@ This wires four distinct sounds to four points in Claude Code's lifecycle:
 | Alert, twice, plus a desktop notification | Claude is waiting on you: a permission prompt, an idle prompt, or a subagent that needs input |
 | Alarm, plus a desktop notification | You hit your usage limit |
 | Alarm, plus a desktop notification | The turn died on some other API error |
+| Rising chime, plus a phone push if enabled | Your usage limit has reset and you can work again |
+| Soft chime, off by default | Your usage window rolled over, whether or not you hit the limit |
 
 It installs into `~/.claude/settings.json`, so it applies to every project and every terminal with no per-repository setup. It also stays quiet when you do not need it: see [Options](#options).
 
@@ -159,7 +161,33 @@ If the bundled sounds are missing, the notifier falls back to the system set: `C
 
 The sounds are generated rather than sourced, by `build/make-sounds.py`, so they are reproducible and carry no licensing question. Six of the nine are interchangeable finish chimes, which is what gives `PROJECT_PITCH` its range.
 
-### Alerts on your phone
+### Knowing when you can work again
+
+Two separate things, because they are not the same:
+
+- **`LIMIT_RESET`** fires when a limit you actually hit has reset. On by default.
+- **`WINDOW_RESET`** fires when the usage window rolls over, even if you only
+  used part of it and were never blocked. Off by default, since most people only
+  care about being unblocked.
+
+Neither can be done by a hook alone, because a hook exits the moment it
+finishes and cannot wait five hours. So the notifier writes the target time to a
+file and starts a copy of itself in the background to watch the clock. No daemon
+to install, and it works whether or not the desktop app is present.
+
+The watcher compares against an absolute time rather than sleeping for a
+duration. Close the lid for three hours, open it, and the next check sees the
+time has passed and fires immediately.
+
+**The reset time is currently an estimate.** Claude Code's rate limit message
+almost certainly contains the real time, but the payload has never been captured
+rather than guessed at, so the alert counts `WINDOW_HOURS` forward from the
+moment you were blocked and says so: "about five hours have passed, your limit
+has probably reset". The notifier saves the next real payload to
+`~/.claude/claude-limit-payload.json`, and once there is one the alert can state
+a fact instead.
+
+## Alerts on your phone
 
 Set `NTFY_TOPIC` to a long, random string, install the free
 [ntfy](https://ntfy.sh) app, and subscribe to that topic. That is the whole

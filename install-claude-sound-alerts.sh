@@ -75,7 +75,7 @@ PROJECT_PITCH=1
 SPEAK=0
 TOAST_ON_DONE=0
 DEBOUNCE_SECONDS=2
-ALWAYS_ALERT="blocked,limit,error"
+ALWAYS_ALERT="blocked,limit,error,limit-reset,window-reset"
 MUTE=""
 QUIET_HOURS=""
 MUTE_UNTIL=""
@@ -267,6 +267,22 @@ ERROR_ENABLED=1
 ERROR_VOLUME=$ERROR_VOLUME
 ERROR_PATTERN=2
 ERROR_SOUND=
+
+# How long a usage window lasts, in hours. Also how far ahead the limit reset is
+# estimated until a real rate limit message can be parsed.
+WINDOW_HOURS=5
+
+LIMIT_RESET_ENABLED=1
+LIMIT_RESET_VOLUME=100
+LIMIT_RESET_PATTERN=2x180
+LIMIT_RESET_SOUND=
+
+# Off by default: most people only care about being unblocked, not about the
+# window rolling over when they never hit the limit.
+WINDOW_RESET_ENABLED=0
+WINDOW_RESET_VOLUME=70
+WINDOW_RESET_PATTERN=1
+WINDOW_RESET_SOUND=
 EOF
 }
 
@@ -424,7 +440,7 @@ UID_=$(id -u 2>/dev/null || echo 0)
 # Normalise up front, so the per-event option lookups below cannot be fed an
 # arbitrary string from the command line.
 case "$KIND" in
-  mark|done|blocked|limit|error) ;;
+  mark|done|blocked|limit|error|limit-reset|window-reset|watch) ;;
   *) KIND="done" ;;
 esac
 
@@ -445,7 +461,7 @@ PROJECT_PITCH=$(cfg PROJECT_PITCH 1)
 SPEAK=$(cfg SPEAK 0)
 TOAST_ON_DONE=$(cfg TOAST_ON_DONE 0)
 DEBOUNCE_SECONDS=$(cfg DEBOUNCE_SECONDS 2)
-ALWAYS_ALERT=$(cfg ALWAYS_ALERT "blocked,limit,error")
+ALWAYS_ALERT=$(cfg ALWAYS_ALERT "blocked,limit,error,limit-reset,window-reset")
 MUTE=$(cfg MUTE "")
 QUIET_HOURS=$(cfg QUIET_HOURS "")
 MUTE_UNTIL=$(cfg MUTE_UNTIL "")
@@ -453,6 +469,8 @@ NTFY_TOPIC=$(cfg NTFY_TOPIC "")
 NTFY_SERVER=$(cfg NTFY_SERVER "https://ntfy.sh")
 NTFY_ALERTS=$(cfg NTFY_ALERTS "blocked,limit,error")
 RESPECT_DND=$(cfg RESPECT_DND 1)
+WINDOW_HOURS=$(cfg WINDOW_HOURS 5)
+case "$WINDOW_HOURS" in ''|*[!0-9]*) WINDOW_HOURS=5 ;; esac
 SOUND_PACK=$(cfg SOUND_PACK "default")
 # A pack name is a single directory component, never a path.
 case "$SOUND_PACK" in ""|*/*|.*) SOUND_PACK="default" ;; esac
@@ -460,9 +478,10 @@ case "$SOUND_PACK" in ""|*/*|.*) SOUND_PACK="default" ;; esac
 # Per-event options, keyed by the uppercased kind: DONE_VOLUME, BLOCKED_PATTERN
 # and so on. Flat keys rather than sections, so the parser above stays a single
 # sed expression and a v1.1.0 config keeps working untouched.
-KIND_UC=$(printf '%s' "$KIND" | tr 'a-z' 'A-Z')
+KIND_UC=$(printf '%s' "$KIND" | tr 'a-z-' 'A-Z_')
 EV_ENABLED=$(cfg "${KIND_UC}_ENABLED" 1)
 EV_VOLUME=$(cfg "${KIND_UC}_VOLUME" 100)
+case "$KIND" in window-reset) EV_ENABLED=$(cfg WINDOW_RESET_ENABLED 0) ;; esac
 EV_SOUND=$(cfg "${KIND_UC}_SOUND" "")
 
 # How many times to play, and how far apart. "2" means twice at the default
@@ -470,6 +489,8 @@ EV_SOUND=$(cfg "${KIND_UC}_SOUND" "")
 # pitch when you are not paying attention.
 case "$KIND" in
   done) EV_PATTERN=$(cfg "DONE_PATTERN" "1") ;;
+  limit-reset)  EV_PATTERN=$(cfg "LIMIT_RESET_PATTERN" "2x180") ;;
+  window-reset) EV_PATTERN=$(cfg "WINDOW_RESET_PATTERN" "1") ;;
   *)    EV_PATTERN=$(cfg "${KIND_UC}_PATTERN" "2") ;;
 esac
 
@@ -529,6 +550,76 @@ record() {
 }
 
 
+# --- waiting for a reset ------------------------------------------------------
+# Two things are worth being told about, and neither can be handled by a hook
+# alone, because a hook exits the moment it finishes:
+#
+#   limit-reset   you were blocked, and now you are not
+#   window-reset  the usage window rolled over, whether or not you hit it
+#
+# So the notifier schedules a time in a file and starts a copy of itself in the
+# background to watch the clock. No daemon to install, and it works whether or
+# not the desktop app is present.
+LIMIT_RESET_AT="$HOME/.claude/claude-limit-reset"
+WINDOW_START_AT="$HOME/.claude/claude-window-start"
+WATCH_ALIVE="$HOME/.claude/claude-watch-alive"
+
+# The watcher touches this every tick. Anything recent means one is already
+# running, so a second is not started. Far simpler than tracking a pid, and it
+# self-heals if a watcher is killed.
+watcher_running() {
+  [ -f "$WATCH_ALIVE" ] || return 1
+  last=$(cat "$WATCH_ALIVE" 2>/dev/null || echo 0)
+  case "$last" in ''|*[!0-9]*) return 1 ;; esac
+  [ $(( $(date +%s) - last )) -lt 150 ]
+}
+
+start_watcher() {
+  [ "${CLAUDE_NOTIFY_DRYRUN:-0}" = "1" ] && return 0
+  watcher_running && return 0
+  # Detached, so it outlives the hook that started it.
+  ( nohup "$0" watch >/dev/null 2>&1 & ) 2>/dev/null || true
+}
+
+# The loop. Wakes once a minute rather than sleeping until the target: a laptop
+# that suspends would make a long sleep fire late by however long the lid was
+# shut, whereas comparing against an absolute time self-corrects on wake.
+if [ "$KIND" = "watch" ]; then
+  while :; do
+    date +%s > "$WATCH_ALIVE" 2>/dev/null || true
+    now=$(date +%s)
+    pending=0
+
+    if [ -f "$LIMIT_RESET_AT" ]; then
+      target=$(cut -d'|' -f1 < "$LIMIT_RESET_AT" 2>/dev/null)
+      case "$target" in
+        ''|*[!0-9]*) rm -f "$LIMIT_RESET_AT" ;;
+        *) if [ "$now" -ge "$target" ]; then
+             estimated=$(cut -d'|' -f2 < "$LIMIT_RESET_AT" 2>/dev/null)
+             rm -f "$LIMIT_RESET_AT"
+             CLAUDE_NOTIFY_ESTIMATED="$estimated" "$0" limit-reset </dev/null >/dev/null 2>&1 || true
+           else pending=1; fi ;;
+      esac
+    fi
+
+    if [ -f "$WINDOW_START_AT" ]; then
+      started=$(cat "$WINDOW_START_AT" 2>/dev/null)
+      case "$started" in
+        ''|*[!0-9]*) rm -f "$WINDOW_START_AT" ;;
+        *) if [ "$now" -ge $(( started + WINDOW_HOURS * 3600 )) ]; then
+             rm -f "$WINDOW_START_AT"
+             "$0" window-reset </dev/null >/dev/null 2>&1 || true
+           else pending=1; fi ;;
+      esac
+    fi
+
+    [ "$pending" = "1" ] || break
+    sleep 60
+  done
+  rm -f "$WATCH_ALIVE" 2>/dev/null || true
+  exit 0
+fi
+
 # --- read the hook payload ----------------------------------------------------
 # Claude Code sends the event JSON on stdin. Every event carries session_id and
 # cwd; Notification carries message.
@@ -581,8 +672,51 @@ fi
 # This is the whole job of the UserPromptSubmit hook. No sound, no notification.
 if [ "$KIND" = "mark" ]; then
   date +%s > "$STARTFILE" 2>/dev/null || true
+
+  # The usage window opens with the first prompt after the last one expired.
+  # Recorded here rather than when the limit is hit, because the window rolls
+  # over whether or not you ever reached the limit.
+  if [ -d "$HOME/.claude" ]; then
+    open_window=1
+    if [ -f "$WINDOW_START_AT" ]; then
+      was=$(cat "$WINDOW_START_AT" 2>/dev/null)
+      case "$was" in
+        ''|*[!0-9]*) ;;
+        *) [ "$(date +%s)" -lt $(( was + WINDOW_HOURS * 3600 )) ] && open_window=0 ;;
+      esac
+    fi
+    if [ "$open_window" = "1" ]; then
+      { date +%s > "$WINDOW_START_AT"; } 2>/dev/null || true
+      start_watcher
+    fi
+  fi
+
   record "kind=mark session=$SESSION"
   exit 0
+fi
+
+# --- schedule the limit reset -------------------------------------------------
+# The reset time is written as an absolute moment, so a machine that sleeps
+# through it still fires on the next check rather than however late it woke.
+#
+# Estimated, until a real rate limit payload has been seen and the message can
+# be parsed. The flag rides along so the alert can say which it is: a confident
+# wrong time is worse than an admitted guess.
+if [ "$KIND" = "limit" ] && [ -d "$HOME/.claude" ] \
+   && [ "${CLAUDE_NOTIFY_DRYRUN:-0}" != "1" ]; then
+  already=0
+  if [ -f "$LIMIT_RESET_AT" ]; then
+    t=$(cut -d'|' -f1 < "$LIMIT_RESET_AT" 2>/dev/null)
+    case "$t" in
+      ''|*[!0-9]*) ;;
+      *) [ "$(date +%s)" -lt "$t" ] && already=1 ;;
+    esac
+  fi
+  if [ "$already" = "0" ]; then
+    { printf '%s|estimated\n' "$(( $(date +%s) + WINDOW_HOURS * 3600 ))" > "$LIMIT_RESET_AT"; } \
+      2>/dev/null || true
+    start_watcher
+  fi
 fi
 
 # CLAUDE_NOTIFY_FORCE=1 plays the alert regardless of every suppression rule
@@ -749,6 +883,24 @@ case "$KIND" in
     FD_SOUNDS="dialog-warning message dialog-information bell"
     TITLE="Claude needs you"
     FALLBACK="Waiting on your input or a permission prompt"
+    ;;
+  limit-reset)
+    BUNDLED_SOUNDS="chime-bright chime-high"
+    MAC_SOUNDS="Hero Glass Ping"
+    FD_SOUNDS="complete message bell"
+    TITLE="Claude is available again"
+    if [ "${CLAUDE_NOTIFY_ESTIMATED:-}" = "estimated" ]; then
+      FALLBACK="About five hours have passed. Your limit has probably reset."
+    else
+      FALLBACK="Your usage limit has reset."
+    fi
+    ;;
+  window-reset)
+    BUNDLED_SOUNDS="chime-mid chime-soft"
+    MAC_SOUNDS="Ping Glass Hero"
+    FD_SOUNDS="message complete bell"
+    TITLE="New usage window"
+    FALLBACK="Your ${WINDOW_HOURS} hour window has rolled over."
     ;;
   limit)
     BUNDLED_SOUNDS="alert-limit"
