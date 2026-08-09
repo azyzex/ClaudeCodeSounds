@@ -458,5 +458,45 @@ rm -rf "$H"
 echo
 
 # --------------------------------------------------------------------------
+echo "case 9: the claude-sounds command"
+# --------------------------------------------------------------------------
+H=$(mktemp -d)
+HOME="$H" NO_TEST_TONE=1 NONINTERACTIVE=1 bash "$INSTALLER" >/dev/null 2>&1
+CLI="$H/.claude/claude-sounds-cli"
+[ -x "$CLI" ] && ok "the installer wrote an executable cli" || bad "cli missing or not executable"
+
+out=$(HOME="$H" bash "$CLI" status 2>&1)
+check "$?" "0" "status exits 0"
+case "$out" in *"5 hooks registered"*) ok "status sees the hooks" ;; *) bad "status did not report hooks: $out" ;; esac
+case "$out" in *"9 sounds installed"*) ok "status sees the sounds" ;; *) bad "status did not report sounds" ;; esac
+
+# The question status exists to answer is "why is nothing happening", so the
+# things that silence alerts have to show up in it.
+HOME="$H" bash "$CLI" mute 45m >/dev/null 2>&1
+check "$?" "0" "mute exits 0"
+out=$(HOME="$H" bash "$CLI" status 2>&1)
+case "$out" in *"temporarily muted"*) ok "status reports an active mute" ;; *) bad "an active mute was not reported" ;; esac
+HOME="$H" bash "$CLI" mute off >/dev/null 2>&1
+out=$(HOME="$H" bash "$CLI" status 2>&1)
+case "$out" in *"temporarily muted"*) bad "the mute was not cleared" ;; *) ok "mute off clears it" ;; esac
+
+# A mute written by the cli must be one the notifier honours: the two agree on
+# the file, or the command is lying to you.
+HOME="$H" bash "$CLI" mute 30m >/dev/null 2>&1
+rm -f "${TMPDIR:-/tmp}"/claude-notify.*.last
+r=$(printf '{}' | HOME="$H" CLAUDE_NOTIFY_DEBUG=1 bash "$H/.claude/claude-notify.sh" blocked 2>/dev/null | tr -d '\r')
+case "$r" in *suppressed=quiet-until*) ok "the notifier honours a mute set by the cli" ;; *) bad "notifier ignored the cli mute: $r" ;; esac
+HOME="$H" bash "$CLI" mute off >/dev/null 2>&1
+
+HOME="$H" bash "$CLI" stats >/dev/null 2>&1
+check "$?" "0" "stats exits 0"
+HOME="$H" bash "$CLI" log >/dev/null 2>&1
+check "$?" "0" "log exits 0"
+HOME="$H" bash "$CLI" nonsense >/dev/null 2>&1
+[ "$?" = "2" ] && ok "an unknown command exits 2" || bad "an unknown command should exit 2"
+rm -rf "$H"
+echo
+
+# --------------------------------------------------------------------------
 printf 'passed %d, failed %d\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ] || exit 1

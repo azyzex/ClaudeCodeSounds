@@ -38,6 +38,7 @@ CLAUDE_DIR="$HOME/.claude"
 NOTIFY_SCRIPT="$CLAUDE_DIR/claude-notify.sh"
 CONF_FILE="$CLAUDE_DIR/claude-notify.conf"
 SOUND_DIR="$CLAUDE_DIR/claude-sounds"
+CLI_SCRIPT="$CLAUDE_DIR/claude-sounds-cli"
 SETTINGS="$CLAUDE_DIR/settings.json"
 MARKER="claude-notify.sh"    # how we recognise our own hook entries
 
@@ -377,7 +378,7 @@ with open(settings_path, 'w', encoding='utf-8') as f:
 PYEOF
 
 if [ "$MODE" = "uninstall" ]; then
-  rm -f "$NOTIFY_SCRIPT"
+  rm -f "$NOTIFY_SCRIPT" "$CLI_SCRIPT"
   rm -rf "$SOUND_DIR"
   ok "removed. restart Claude Code."
   dim "left $(basename "$CONF_FILE") in place, in case you reinstall"
@@ -395,6 +396,15 @@ NOTIFYEOF
 
 chmod +x "$NOTIFY_SCRIPT"
 ok "wrote $(basename "$NOTIFY_SCRIPT")"
+
+# ---------------------------------------------------------------- the cli ---
+# A small command for checking on all this from a terminal, which is where
+# people already are.
+cat > "$CLI_SCRIPT" <<'CLIEOF'
+@@CLI@@
+CLIEOF
+chmod +x "$CLI_SCRIPT"
+ok "wrote $(basename "$CLI_SCRIPT")"
 
 # ------------------------------------------------------------ the sounds ---
 # Written out from the base64 block at the end of this file, so a machine with
@@ -453,5 +463,6 @@ ok "Done. Restart Claude Code, then run /hooks to confirm five entries are liste
 dim "Change options:      bash $(basename "$0") --config"
 dim "Or edit directly:    $CONF_FILE"
 dim 'Why was I not told?  CLAUDE_NOTIFY_DEBUG=1 ~/.claude/claude-notify.sh done'
+dim "Is it working?      bash $CLI_SCRIPT status"
 dim 'Silence everything:  set "disableAllHooks": true in settings.json'
 printf '\n'

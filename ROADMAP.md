@@ -97,15 +97,15 @@ that already exists.
 - [ ] **Respect the OS do-not-disturb** — Windows Focus Assist, and the desktop
       equivalents on Linux. `QUIET_HOURS` currently duplicates something the OS
       already knows.
-- [ ] **Stats** — turns today, median duration, time spent blocked. The log
+- [x] **Stats** — turns today, median duration, time spent blocked. The log
       already carries timestamps and durations.
-- [ ] **Health check** — one command answering "why is nothing happening": are
+- [x] **Health check** — one command answering "why is nothing happening": are
       the hooks registered, is the notifier present, does a player exist, is a
       mute active, did anything fire recently.
 - [ ] **Auto-update** for the app. Tauri's updater signs with its own free
       keypair, so it costs nothing. Without it, nobody learns a new version
       exists.
-- [ ] **A small CLI** — `mute 1h`, `test blocked`, `status`. Terminal people
+- [x] **A small CLI** — `mute 1h`, `test blocked`, `status`. Terminal people
       will not open a window for that.
 - [ ] **More hook events** — `PreCompact` is the interesting one, since a
       heads-up that context is about to compact is actionable. `SubagentStop`

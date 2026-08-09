@@ -96,6 +96,15 @@ def render(template_path, placeholder, notifier_path):
                 )
 
     out = template.replace(placeholder, notifier)
+    if '@@CLI@@' in out:
+        cli = read('claude-sounds').replace('\r\n', '\n').rstrip('\n')
+        for i, line in enumerate(cli.split('\n'), 1):
+            if line.startswith('CLIEOF'):
+                raise SystemExit(
+                    'claude-sounds line %d starts with CLIEOF, which would end '
+                    'the embedded block early' % i
+                )
+        out = out.replace('@@CLI@@', cli)
     if '@@SOUNDS@@' in out:
         out = out.replace('@@SOUNDS@@', sound_blob())
     return out.replace('\r\n', '\n')

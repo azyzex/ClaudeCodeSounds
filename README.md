@@ -179,6 +179,27 @@ You do not need a complete set. Anything the pack is missing falls back to `defa
 
 The filenames are `chime-glass`, `chime-soft`, `chime-bright`, `chime-low`, `chime-warm` and `chime-mid` for finished turns, then `alert-attention`, `alert-limit` and `alert-error`.
 
+## The claude-sounds command
+
+Installed alongside the notifier on Linux and macOS, at
+`~/.claude/claude-sounds-cli`.
+
+```
+claude-sounds-cli status     is any of this actually working
+claude-sounds-cli stats      how your turns have been going
+claude-sounds-cli log        recent alerts, and why some were skipped
+claude-sounds-cli test blocked
+claude-sounds-cli mute 1h    30m, 2h, or off
+```
+
+`status` is the one worth knowing. It answers "why is nothing happening" in one
+go: whether the hooks are registered, whether the notifier and sounds are there,
+whether any audio player exists, whether something is currently muting you, and
+when the last alert fired.
+
+It reads and writes the same files the notifier uses, with no state of its own,
+so it cannot disagree with what actually happens.
+
 ## Troubleshooting
 
 **Nothing fires at all.** Restart Claude Code first, since settings are read at startup. Then run `claude --debug` and watch for the hook lines as events happen.

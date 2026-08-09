@@ -38,6 +38,7 @@ CLAUDE_DIR="$HOME/.claude"
 NOTIFY_SCRIPT="$CLAUDE_DIR/claude-notify.sh"
 CONF_FILE="$CLAUDE_DIR/claude-notify.conf"
 SOUND_DIR="$CLAUDE_DIR/claude-sounds"
+CLI_SCRIPT="$CLAUDE_DIR/claude-sounds-cli"
 SETTINGS="$CLAUDE_DIR/settings.json"
 MARKER="claude-notify.sh"    # how we recognise our own hook entries
 
@@ -377,7 +378,7 @@ with open(settings_path, 'w', encoding='utf-8') as f:
 PYEOF
 
 if [ "$MODE" = "uninstall" ]; then
-  rm -f "$NOTIFY_SCRIPT"
+  rm -f "$NOTIFY_SCRIPT" "$CLI_SCRIPT"
   rm -rf "$SOUND_DIR"
   ok "removed. restart Claude Code."
   dim "left $(basename "$CONF_FILE") in place, in case you reinstall"
@@ -937,6 +938,278 @@ NOTIFYEOF
 chmod +x "$NOTIFY_SCRIPT"
 ok "wrote $(basename "$NOTIFY_SCRIPT")"
 
+# ---------------------------------------------------------------- the cli ---
+# A small command for checking on all this from a terminal, which is where
+# people already are.
+cat > "$CLI_SCRIPT" <<'CLIEOF'
+#!/usr/bin/env bash
+# =============================================================================
+#  claude-sounds - a small command for the sound alerts
+# =============================================================================
+#
+#    claude-sounds status     is any of this actually working
+#    claude-sounds stats      how your turns have been going
+#    claude-sounds log        recent alerts, and why some were skipped
+#    claude-sounds test KIND  play one alert now (done, blocked, limit, error)
+#    claude-sounds mute 1h    silence everything for a while (30m, 2h, off)
+#
+#  Everything here reads or writes the same files the notifier uses. There is
+#  no state of its own, so it can never disagree with what actually happens.
+# =============================================================================
+
+set -uo pipefail
+
+CLAUDE_DIR="$HOME/.claude"
+CONF="$CLAUDE_DIR/claude-notify.conf"
+NOTIFIER="$CLAUDE_DIR/claude-notify.sh"
+SOUND_DIR="$CLAUDE_DIR/claude-sounds"
+SETTINGS="$CLAUDE_DIR/settings.json"
+LOGFILE="$CLAUDE_DIR/claude-notify.log"
+
+bold()  { printf '\033[1m%s\033[0m\n' "$1"; }
+ok()    { printf '  \033[32mok\033[0m    %s\n' "$1"; }
+warn()  { printf '  \033[33mwarn\033[0m  %s\n' "$1"; }
+bad()   { printf '  \033[31mno\033[0m    %s\n' "$1"; }
+dim()   { printf '        \033[90m%s\033[0m\n' "$1"; }
+
+PY=""
+for c in python3 python; do
+  if command -v "$c" >/dev/null 2>&1; then PY="$c"; break; fi
+done
+
+cfg() {
+  local v=""
+  if [ -f "$CONF" ]; then
+    v=$(sed -n "s/^[[:space:]]*$1[[:space:]]*=[[:space:]]*//p" "$CONF" \
+        | tail -1 | tr -d '\r' | sed 's/[[:space:]]*$//')
+  fi
+  if [ -n "$v" ]; then printf '%s' "$v"; else printf '%s' "$2"; fi
+}
+
+# --------------------------------------------------------------- status ---
+# Answers "why is nothing happening", which is the only question anyone has
+# when a notifier is silent. Every check below is a thing that has actually
+# gone wrong for someone.
+cmd_status() {
+  bold "Claude Code sound alerts"
+  printf '\n'
+
+  if [ -d "$CLAUDE_DIR" ]; then ok "found $CLAUDE_DIR"
+  else bad "no ~/.claude. Run Claude Code once first."; return 1; fi
+
+  if [ -f "$NOTIFIER" ]; then ok "notifier installed"
+  else bad "notifier missing. Re-run the installer."; fi
+
+  local hooks=0
+  if [ -f "$SETTINGS" ] && [ -n "$PY" ]; then
+    hooks=$("$PY" - "$SETTINGS" <<'PYEOF'
+import json, sys
+try:
+    h = json.load(open(sys.argv[1], encoding='utf-8-sig')).get('hooks', {})
+except Exception:
+    print(0); raise SystemExit(0)
+print(sum(1 for v in h.values() for g in v
+          if 'claude-notify' in json.dumps(g)))
+PYEOF
+) || hooks=0
+  fi
+  hooks=$(printf '%s' "$hooks" | tr -d ' \r')
+  case "$hooks" in
+    5)  ok "5 hooks registered" ;;
+    0)  bad "no hooks registered. Re-run the installer, then restart Claude Code." ;;
+    *)  warn "$hooks hooks registered, expected 5"
+        dim "re-run the installer, then restart Claude Code" ;;
+  esac
+
+  if grep -q '"disableAllHooks"[[:space:]]*:[[:space:]]*true' "$SETTINGS" 2>/dev/null; then
+    bad "disableAllHooks is true in settings.json, so nothing will fire"
+  fi
+
+  local pack; pack=$(cfg SOUND_PACK default)
+  local n; n=$(find "$SOUND_DIR" -name '*.wav' 2>/dev/null | wc -l | tr -d ' ')
+  if [ "${n:-0}" -gt 0 ]; then ok "$n sounds installed, pack '$pack'"
+  else warn "no bundled sounds; falling back to system sounds"; fi
+
+  local players=""
+  for p in afplay paplay pw-play canberra-gtk-play ffplay aplay; do
+    command -v "$p" >/dev/null 2>&1 && players="$players $p"
+  done
+  if [ -n "$players" ]; then ok "audio players:${players}"
+  else bad "no audio player found, so alerts fall back to a terminal bell"
+       dim "linux: sudo apt install pulseaudio-utils   or   alsa-utils"; fi
+
+  # Anything currently silencing alerts, which is the most common answer.
+  local until; until=$(cfg MUTE_UNTIL "")
+  case "$until" in
+    ''|*[!0-9]*) ;;
+    *) if [ "$(date +%s)" -lt "$until" ]; then
+         warn "temporarily muted for another $(( (until - $(date +%s)) / 60 )) minutes"
+         dim "claude-sounds mute off"
+       fi ;;
+  esac
+  local muted; muted=$(cfg MUTE "")
+  [ -n "$muted" ] && warn "these kinds are muted: $muted"
+  local qh; qh=$(cfg QUIET_HOURS "")
+  [ -n "$qh" ] && ok "quiet hours: $qh"
+  local mins; mins=$(cfg MIN_SECONDS 30)
+  [ "$mins" != "0" ] && ok "turns under ${mins}s stay silent"
+  [ "$(cfg SUPPRESS_WHEN_FOCUSED 1)" = "1" ] && ok "silent while the terminal is focused"
+  local topic; topic=$(cfg NTFY_TOPIC "")
+  [ -n "$topic" ] && ok "phone push enabled for: $(cfg NTFY_ALERTS 'blocked,limit,error')"
+
+  if [ -f "$LOGFILE" ]; then
+    local last; last=$(tail -n 1 "$LOGFILE" 2>/dev/null | cut -d'|' -f1)
+    case "$last" in
+      ''|*[!0-9]*) ;;
+      *) ok "last alert $(human_ago "$last")" ;;
+    esac
+  else
+    warn "nothing has fired yet"
+    dim "restart Claude Code if you have only just installed"
+  fi
+  printf '\n'
+}
+
+human_ago() {
+  local secs=$(( $(date +%s) - $1 ))
+  if [ "$secs" -lt 60 ]; then printf 'just now'
+  elif [ "$secs" -lt 3600 ]; then printf '%dm ago' $(( secs / 60 ))
+  elif [ "$secs" -lt 86400 ]; then printf '%dh ago' $(( secs / 3600 ))
+  else printf '%dd ago' $(( secs / 86400 )); fi
+}
+
+# ---------------------------------------------------------------- stats ---
+cmd_stats() {
+  [ -f "$LOGFILE" ] || { echo "No alerts recorded yet."; return 0; }
+  [ -n "$PY" ] || { echo "python3 is needed for stats."; return 1; }
+  "$PY" - "$LOGFILE" <<'PYEOF'
+import sys, time, collections
+
+now = time.time()
+day = now - 86400
+week = now - 7 * 86400
+
+kinds, outcomes, elapsed = collections.Counter(), collections.Counter(), []
+today = week_count = 0
+
+for line in open(sys.argv[1], encoding='utf-8', errors='replace'):
+    stamp, _, rest = line.partition('|')
+    try:
+        at = int(stamp)
+    except ValueError:
+        continue
+    fields = dict(p.split('=', 1) for p in rest.split() if '=' in p)
+    kind = fields.get('kind')
+    if not kind or kind == 'mark':
+        continue
+    if at >= week:
+        week_count += 1
+    if at >= day:
+        today += 1
+        kinds[kind] += 1
+        outcomes['played' if 'suppressed' not in fields else fields['suppressed']] += 1
+    e = fields.get('elapsed')
+    if e and e.isdigit() and at >= week:
+        elapsed.append(int(e))
+
+print("\033[1mLast 24 hours\033[0m")
+print("  %d alerts" % today)
+for k, n in kinds.most_common():
+    print("    %-10s %d" % (k, n))
+if outcomes:
+    print("  outcomes")
+    for k, n in outcomes.most_common():
+        print("    %-14s %d" % (k, n))
+
+print("")
+print("\033[1mLast 7 days\033[0m")
+print("  %d alerts" % week_count)
+def duration(secs):
+    if secs >= 3600:
+        return "%dh %dm" % (secs // 3600, (secs % 3600) // 60)
+    return "%dm %ds" % (secs // 60, secs % 60)
+
+
+if elapsed:
+    elapsed.sort()
+    mid = elapsed[len(elapsed) // 2]
+    print("  %d timed turns, median %s, longest %s"
+          % (len(elapsed), duration(mid), duration(elapsed[-1])))
+    print("  %s of Claude working while you were away" % duration(sum(elapsed)))
+else:
+    print("  no timed turns yet")
+PYEOF
+}
+
+# ------------------------------------------------------------------ log ---
+cmd_log() {
+  [ -f "$LOGFILE" ] || { echo "Nothing yet."; return 0; }
+  tail -n "${1:-15}" "$LOGFILE" | while IFS='|' read -r stamp rest; do
+    case "$stamp" in ''|*[!0-9]*) continue ;; esac
+    case "$rest" in *"kind=mark"*) continue ;; esac
+    kind=$(printf '%s' "$rest" | sed -n 's/.*kind=\([^ ]*\).*/\1/p')
+    why=$(printf '%s' "$rest" | sed -n 's/.*suppressed=\([^ ]*\).*/\1/p')
+    printf '  %-9s %-8s %s\n' "$(human_ago "$stamp")" "$kind" "${why:-played}"
+  done
+}
+
+# ----------------------------------------------------------------- test ---
+cmd_test() {
+  local kind="${1:-blocked}"
+  [ -f "$NOTIFIER" ] || { echo "The notifier is not installed."; return 1; }
+  rm -f "${TMPDIR:-/tmp}/claude-notify.$(id -u 2>/dev/null || echo 0).last"
+  # Forced, so the alert you asked to hear is not swallowed by the very
+  # suppression rules you are testing.
+  printf '{}' | CLAUDE_NOTIFY_FORCE=1 CLAUDE_NOTIFY_DEBUG=1 bash "$NOTIFIER" "$kind"
+}
+
+# ----------------------------------------------------------------- mute ---
+cmd_mute() {
+  local arg="${1:-60m}"
+  local mins=0
+  case "$arg" in
+    off|0)      mins=0 ;;
+    *h)         mins=$(( ${arg%h} * 60 )) ;;
+    *m)         mins=${arg%m} ;;
+    *[!0-9]*)   echo "Use 30m, 2h, or off."; return 2 ;;
+    *)          mins=$arg ;;
+  esac
+  case "$mins" in *[!0-9]*) echo "Use 30m, 2h, or off."; return 2 ;; esac
+
+  local value=""
+  [ "$mins" -gt 0 ] && value=$(( $(date +%s) + mins * 60 ))
+  set_conf MUTE_UNTIL "$value"
+  if [ "$mins" -gt 0 ]; then echo "Quiet for $mins minutes."
+  else echo "Alerts back on."; fi
+}
+
+set_conf() {
+  [ -f "$CONF" ] || { echo "No config file. Run the installer first."; return 1; }
+  local tmp="$CONF.tmp"
+  if grep -q "^$1=" "$CONF"; then
+    sed "s|^$1=.*|$1=$2|" "$CONF" > "$tmp" && mv "$tmp" "$CONF"
+  else
+    cp "$CONF" "$tmp" && printf '%s=%s\n' "$1" "$2" >> "$tmp" && mv "$tmp" "$CONF"
+  fi
+}
+
+usage() {
+  sed -n '3,15p' "$0" | sed 's/^#[ ]\{0,2\}//'
+}
+
+case "${1:-status}" in
+  status)  cmd_status ;;
+  stats)   cmd_stats ;;
+  log)     shift; cmd_log "${1:-15}" ;;
+  test)    shift; cmd_test "${1:-blocked}" ;;
+  mute)    shift; cmd_mute "${1:-60m}" ;;
+  -h|--help|help) usage ;;
+  *)       echo "Unknown command: $1"; printf '\n'; usage; exit 2 ;;
+esac
+CLIEOF
+chmod +x "$CLI_SCRIPT"
+ok "wrote $(basename "$CLI_SCRIPT")"
+
 # ------------------------------------------------------------ the sounds ---
 # Written out from the base64 block at the end of this file, so a machine with
 # no system sound theme still gets real audio instead of a terminal bell.
@@ -1002,5 +1275,6 @@ ok "Done. Restart Claude Code, then run /hooks to confirm five entries are liste
 dim "Change options:      bash $(basename "$0") --config"
 dim "Or edit directly:    $CONF_FILE"
 dim 'Why was I not told?  CLAUDE_NOTIFY_DEBUG=1 ~/.claude/claude-notify.sh done'
+dim "Is it working?      bash $CLI_SCRIPT status"
 dim 'Silence everything:  set "disableAllHooks": true in settings.json'
 printf '\n'
