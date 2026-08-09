@@ -17,14 +17,17 @@ can start it at all, which the browser enforces before this code runs.
 
 What it accepts is deliberately tiny: an alert kind, and when it happened. It
 never accepts a file path, a command, a URL, or any text to display. The worst a
-compromised extension can do through this is play one of four sounds.
+compromised extension can do through this is play one of four sounds, or set a
+countdown to a time it claims your usage window resets.
 
 Protocol, as the browser defines it: a four byte little-endian length, then that
 many bytes of JSON, on stdin. Replies go back the same way on stdout.
 """
 
+import datetime
 import json
 import os
+import re
 import struct
 import subprocess
 import sys
@@ -111,9 +114,118 @@ def notify(kind):
     return None
 
 
+ISO = re.compile(r'^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(\.\d+)?'
+                 r'(Z|[+-]\d{2}:?\d{2})?$')
+ACCOUNT = re.compile(r'^[0-9a-f]{6,32}$')
+
+
+def window_or_none(value):
+    """Validate one usage window, or reject it.
+
+    Only two fields survive: a percentage and a reset time. Everything else the
+    endpoint returns, including anything to do with money, is dropped here
+    rather than being carried around and then ignored.
+    """
+    if not isinstance(value, dict):
+        return None
+    pct = value.get('utilization')
+    at = value.get('resets_at')
+    if not isinstance(pct, (int, float)) or not 0 <= pct <= 100:
+        return None
+    if not isinstance(at, str) or not ISO.match(at):
+        return None
+    # The pattern only proves the shape. "2026-13-45T99:99:99" passes it and is
+    # not a date, so it gets parsed for real, and then sanity checked: a reset
+    # is soon, and a bogus far-future time would silently mean no alert ever.
+    try:
+        when = datetime.datetime.fromisoformat(at.replace('Z', '+00:00'))
+        if when.tzinfo is None:
+            when = when.replace(tzinfo=datetime.timezone.utc)
+    except ValueError:
+        return None
+    ahead = (when - datetime.datetime.now(datetime.timezone.utc)).total_seconds()
+    if ahead < -3600 or ahead > 8 * 24 * 3600:
+        return None
+    return {'used': int(pct), 'resets_at': at}
+
+
+def store_limits(message):
+    """Record limits the browser observed, kept apart by account.
+
+    Claude Code and the browser may be signed into different accounts, and the
+    window is per account, so a reset time learned in one place is simply wrong
+    for the other. Each source writes its own file, tagged with the account it
+    saw, and nothing merges them. Two honest countdowns beat one confident
+    wrong one.
+
+    The account is a hash the extension computed, never the organisation id
+    itself: enough to tell two accounts apart, not an identifier sitting in a
+    file.
+    """
+    account = message.get('account')
+    if not isinstance(account, str) or not ACCOUNT.match(account):
+        return {'ok': False, 'error': 'bad account'}
+
+    five = window_or_none(message.get('five_hour'))
+    week = window_or_none(message.get('seven_day'))
+    if not five and not week:
+        return {'ok': False, 'error': 'no usable window'}
+
+    directory = claude_dir()
+    if not directory:
+        return {'ok': False, 'error': 'no home directory'}
+    target = os.path.join(directory, 'claude-limits.d')
+    try:
+        os.makedirs(target, exist_ok=True)
+        path = os.path.join(target, 'web.conf')
+        lines = ['updated=%d' % int(time.time()), 'source=web',
+                 'account=%s' % account]
+        if five:
+            lines.append('five_hour_resets_at=%s' % five['resets_at'])
+            lines.append('five_hour_used=%d' % five['used'])
+        if week:
+            lines.append('seven_day_resets_at=%s' % week['resets_at'])
+            lines.append('seven_day_used=%d' % week['used'])
+        tmp = path + '.tmp'
+        with open(tmp, 'w', encoding='utf-8') as f:
+            f.write('\n'.join(lines) + '\n')
+        os.replace(tmp, path)
+    except Exception as exc:
+        return {'ok': False, 'error': 'could not save: %s' % exc}
+
+    # Nothing is played here. This is a clock being set, not an event, and the
+    # watcher is what eventually speaks.
+    start_watcher()
+    return {'ok': True, 'stored': True}
+
+
+def start_watcher():
+    """Make sure something is counting down. Harmless if one already is."""
+    directory = claude_dir()
+    if not directory:
+        return
+    if os.name == 'nt':
+        script = os.path.join(directory, 'claude-notify.ps1')
+        cmd = ['powershell.exe', '-NoProfile', '-ExecutionPolicy', 'Bypass',
+               '-File', script, '-Kind', 'watch']
+    else:
+        script = os.path.join(directory, 'claude-notify.sh')
+        cmd = ['bash', script, 'watch']
+    if not os.path.exists(script):
+        return
+    try:
+        subprocess.Popen(cmd, stdin=subprocess.DEVNULL,
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except Exception:
+        pass
+
+
 def handle(message):
     if not isinstance(message, dict):
         return {'ok': False, 'error': 'not an object'}
+
+    if message.get('kind') == 'limits':
+        return store_limits(message)
 
     kind = message.get('kind')
     # The type check is not redundant: `x in set` raises on an unhashable value,

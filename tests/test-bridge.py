@@ -9,12 +9,24 @@ therefore about what it refuses.
 
 import json
 import os
+import io
+import shutil
+import tempfile
 import struct
 import subprocess
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 BRIDGE = os.path.join(os.path.dirname(HERE), 'bridge', 'earshot-bridge.py')
+
+# Most tests drive the bridge as a real subprocess, which is how the browser
+# uses it. The validation tests call handle() directly instead: they are about
+# what it accepts rather than how it is spoken to, and going through the wire
+# for each of forty inputs would only slow them down.
+import importlib.util
+_spec = importlib.util.spec_from_file_location('earshot_bridge', BRIDGE)
+bridge = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(bridge)
 
 PASS = FAIL = 0
 
@@ -104,6 +116,84 @@ print('repeats are rate limited')
 replies, _ = run([{'kind': 'done'}, {'kind': 'done'}, {'kind': 'done'}])
 skipped = sum(1 for r in replies if r.get('skipped'))
 check(skipped, 2, 'only the first of three is acted on')
+
+
+# --- the limits kind ---------------------------------------------------------
+# Added once the usage endpoint was proven to carry resets_at. These matter more
+# than the sound kinds: this one writes to disk and sets a clock.
+
+print('')
+print('limits are validated before anything is written')
+
+# Computed rather than written down. The bridge sanity checks that a reset is
+# actually near, so a fixed date here would pass today and fail the build
+# tomorrow.
+import datetime as _dt
+GOOD_AT = (_dt.datetime.now(_dt.timezone.utc)
+           + _dt.timedelta(hours=2)).isoformat()
+
+
+def limits(**over):
+    msg = {'kind': 'limits', 'account': 'a1b2c3d4e5f6',
+           'five_hour': {'utilization': 93, 'resets_at': GOOD_AT}}
+    msg.update(over)
+    return msg
+
+
+# The account is the whole reason two signed-in accounts cannot contaminate
+# each other, so anything that is not a plain hash is refused.
+for junk in ('', 'NOTAHASH', '../../etc/passwd', 'a1b2c3d4e5f6; rm -rf /',
+            None, 42, {'a': 1}, 'g' * 12, 'abc'):
+    check(bridge.handle(limits(account=junk)).get('error'), 'bad account',
+          'account %r refused' % (junk,))
+
+# A reset time is a timestamp or it is nothing. A bad one would schedule the
+# alert for the wrong moment, which is worse than no alert at all.
+for junk in ('tomorrow', '', '2026-13-45T99:99:99', 'now()', None, 0,
+            {'nested': 1}, '2026-08-09',
+            '2026-13-45T99:99:99',           # shape-valid, not a date
+            '2099-01-01T00:00:00+00:00'):    # real, but no window is that long
+    check(bridge.handle(limits(five_hour={'utilization': 50,
+                                          'resets_at': junk})).get('error'),
+          'no usable window', 'resets_at %r refused' % (junk,))
+
+for junk in (-1, 101, 'lots', None, [50]):
+    check(bridge.handle(limits(five_hour={'utilization': junk,
+                                          'resets_at': GOOD_AT})).get('error'),
+          'no usable window', 'utilization %r refused' % (junk,))
+
+check(bridge.handle(limits(five_hour=None)).get('error'), 'no usable window',
+      'a message with no usable window is refused')
+
+print('')
+print('a good message is stored, and only the two fields survive')
+
+_home = tempfile.mkdtemp()
+_old = dict(os.environ)
+os.environ['HOME'] = _home
+os.environ['USERPROFILE'] = _home
+os.makedirs(os.path.join(_home, '.claude'), exist_ok=True)
+try:
+    _reply = bridge.handle(limits(seven_day={'utilization': 35,
+                                             'resets_at': GOOD_AT,
+                                             'limit_dollars': 20,
+                                             'used_dollars': 12.5}))
+    check(_reply.get('ok'), True, 'accepted')
+    _f = os.path.join(_home, '.claude', 'claude-limits.d', 'web.conf')
+    check(os.path.exists(_f), True, 'written to its own file, not the shared one')
+    _body = io.open(_f, encoding='utf-8').read()
+    check('account=a1b2c3d4e5f6' in _body, True, 'records which account it saw')
+    check('source=web' in _body, True, 'records which surface saw it')
+    check('five_hour_resets_at=' + GOOD_AT in _body, True, 'keeps the reset time')
+    check('five_hour_used=93' in _body, True, 'keeps the percentage')
+    check('seven_day_used=35' in _body, True, 'keeps the weekly window too')
+    # Money is in the response and has no business being on disk.
+    check('dollar' in _body or '12.5' in _body, False,
+          'drops everything about money')
+finally:
+    os.environ.clear()
+    os.environ.update(_old)
+    shutil.rmtree(_home, ignore_errors=True)
 
 print('')
 print('passed %d, failed %d' % (PASS, FAIL))

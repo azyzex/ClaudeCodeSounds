@@ -95,6 +95,30 @@ the path of **every** response including message content. That trades a large
 amount of your privacy for a countdown. If Phase 1 shows this is the only way,
 the honest answer is to not do it and to explain why in the README.
 
+### Phase 2 decision, 9 August 2026
+
+`/usage` returns exactly what was needed:
+
+```
+five_hour: { utilization: 93, resets_at: <ISO timestamp> }
+seven_day: { utilization: 35, resets_at: <ISO timestamp> }
+```
+
+Same field names the Claude Code statusline is handed, so both sources agree
+without translation, and the weekly window comes free.
+
+**Taken: the "acceptable with care" route.** One GET every ten minutes, only
+while a claude.ai tab is open, to an endpoint the page already calls itself. It
+runs no model, so it costs nothing. It needs no permission beyond the
+`host_permissions` already held.
+
+**Refused, as written in advance: wrapping `fetch`.** It was never needed.
+
+Only four values are kept: two percentages and two timestamps. Everything else
+the endpoint returns, including every field about money, is dropped at the
+bridge rather than carried around and ignored. CI now fails the build if
+`webRequest`, `debugger` or `scripting` ever appear in the manifest.
+
 ---
 
 ## Phase 3: connect the surfaces, and prove it

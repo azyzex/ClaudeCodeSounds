@@ -1,3 +1,7 @@
+// The usage poller lives alongside this: it answers 'when does my window
+// reset', which is the reason the extension exists.
+import './usage.js';
+
 // Earshot for Web - the part that decides what to do with an event.
 //
 // The content script observes and reports. This decides. Keeping those apart

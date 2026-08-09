@@ -10,12 +10,17 @@
     "128": "icons/128x128.png"
   },
   "background": {
-    "service_worker": "background.js"
+    "service_worker": "background.js",
+    "type": "module"
   },
   "content_scripts": [
     {
-      "matches": ["https://claude.ai/*"],
-      "js": ["content.js"],
+      "matches": [
+        "https://claude.ai/*"
+      ],
+      "js": [
+        "content.js"
+      ],
       "run_at": "document_idle"
     }
   ],
@@ -23,7 +28,15 @@
     "default_popup": "popup.html",
     "default_title": "Earshot"
   },
-  "permissions": ["storage", "notifications"],
-  "optional_permissions": ["nativeMessaging"],
-  "host_permissions": ["https://claude.ai/*"]
+  "permissions": [
+    "storage",
+    "notifications",
+    "alarms"
+  ],
+  "optional_permissions": [
+    "nativeMessaging"
+  ],
+  "host_permissions": [
+    "https://claude.ai/*"
+  ]
 }

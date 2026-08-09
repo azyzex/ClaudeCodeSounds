@@ -218,6 +218,10 @@ jobs:
               assert banned not in m.get('host_permissions', []), banned
           assert 'nativeMessaging' in m.get('optional_permissions', []),               'the bridge permission must stay optional'
           assert 'nativeMessaging' not in m.get('permissions', []),               'the bridge permission must not be required'
+          # The usage poller must never grow into request interception: that
+          # would put the extension in the path of message content.
+          for banned in ('webRequest', 'webRequestBlocking', 'debugger', 'scripting'):
+              assert banned not in m.get('permissions', []), banned
           print('manifest ok:', m['host_permissions'], m['permissions'])
           PY
 
