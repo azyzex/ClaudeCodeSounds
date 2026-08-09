@@ -162,6 +162,16 @@ fi
 [ -n "$SESSION" ] || SESSION="nosession"
 STARTFILE="$TMP/claude-notify-start.$UID_.$(printf '%s' "$SESSION" | tr -c 'a-zA-Z0-9_-' '_')"
 
+# --- keep the rate limit payload ----------------------------------------------
+# The reset time is somewhere in this message, but its exact shape has never
+# been seen rather than guessed at. Saving the next real one means the parser
+# can be written against fact instead of assumption. One file, overwritten each
+# time, so it cannot grow.
+if [ "$KIND" = "limit" ] && [ -n "${PAYLOAD:-}" ] && [ -d "$HOME/.claude" ] \
+   && [ "${CLAUDE_NOTIFY_DRYRUN:-0}" != "1" ]; then
+  { printf '%s\n' "$PAYLOAD" > "$HOME/.claude/claude-limit-payload.json"; } 2>/dev/null || true
+fi
+
 # --- mark: a turn began -------------------------------------------------------
 # This is the whole job of the UserPromptSubmit hook. No sound, no notification.
 if [ "$KIND" = "mark" ]; then

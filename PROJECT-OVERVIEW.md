@@ -1,3 +1,5 @@
+vvvvv
+
 # ClaudeCodeSounds — project overview
 
 A briefing document. It describes what this project is, how it is built, what
@@ -25,13 +27,13 @@ Claude Code has a **hooks** system: you attach a shell command to a named point
 in its lifecycle in `~/.claude/settings.json`, and it runs deterministically,
 without the model deciding to call it. Five events are wired:
 
-| Event | Matcher | Purpose |
-| --- | --- | --- |
-| `UserPromptSubmit` | none | Records a start time. Plays nothing. |
-| `Stop` | none | The turn finished. |
-| `Notification` | `permission_prompt\|idle_prompt\|agent_needs_input\|elicitation_dialog` | Claude needs you. |
-| `StopFailure` | `rate_limit` | You hit the usage limit. |
-| `StopFailure` | every other error type | The turn died on an API error. |
+| Event                | Matcher                                                                | Purpose                              |
+| -------------------- | ---------------------------------------------------------------------- | ------------------------------------ |
+| `UserPromptSubmit` | none                                                                   | Records a start time. Plays nothing. |
+| `Stop`             | none                                                                   | The turn finished.                   |
+| `Notification`     | `permission_prompt\|idle_prompt\|agent_needs_input\|elicitation_dialog` | Claude needs you.                    |
+| `StopFailure`      | `rate_limit`                                                         | You hit the usage limit.             |
+| `StopFailure`      | every other error type                                                 | The turn died on an API error.       |
 
 `StopFailure` filtering on `rate_limit` is the interesting one, and the hardest
 alert to obtain any other way: hitting the usage limit gets its own distinct
@@ -87,15 +89,15 @@ One script per platform. On each alert it:
 The first version chimed on every turn, which is what makes a notifier get
 switched off within a week. The useful version knows when to stay quiet:
 
-| Option | Default | Effect |
-| --- | --- | --- |
-| `MIN_SECONDS` | 30 | Silent if the turn was shorter than this. Needs the `UserPromptSubmit` start time. |
-| `SUPPRESS_WHEN_FOCUSED` | 1 | Silent if the terminal is already the focused window. |
-| `QUIET_HOURS` | empty | e.g. `23:00-08:00`, wrapping past midnight. |
-| `MUTE_UNTIL` | empty | Epoch second. An expiry rather than a flag, so a forgotten mute lifts itself. |
-| `DEBOUNCE_SECONDS` | 2 | Ignore repeats. |
-| `ALWAYS_ALERT` | `blocked,limit,error` | Kinds that bypass the elapsed and focus checks. |
-| `MUTE` | empty | Kinds silenced entirely. |
+| Option                    | Default                 | Effect                                                                              |
+| ------------------------- | ----------------------- | ----------------------------------------------------------------------------------- |
+| `MIN_SECONDS`           | 30                      | Silent if the turn was shorter than this. Needs the`UserPromptSubmit` start time. |
+| `SUPPRESS_WHEN_FOCUSED` | 1                       | Silent if the terminal is already the focused window.                               |
+| `QUIET_HOURS`           | empty                   | e.g.`23:00-08:00`, wrapping past midnight.                                        |
+| `MUTE_UNTIL`            | empty                   | Epoch second. An expiry rather than a flag, so a forgotten mute lifts itself.       |
+| `DEBOUNCE_SECONDS`      | 2                       | Ignore repeats.                                                                     |
+| `ALWAYS_ALERT`          | `blocked,limit,error` | Kinds that bypass the elapsed and focus checks.                                     |
+| `MUTE`                  | empty                   | Kinds silenced entirely.                                                            |
 
 Plus per-event: `<KIND>_ENABLED`, `_VOLUME`, `_PATTERN`, `_SOUND` for each of
 `DONE`, `BLOCKED`, `LIMIT`, `ERROR`.

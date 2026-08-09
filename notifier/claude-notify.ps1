@@ -129,6 +129,17 @@ try {
             }
             if ($obj.session_id) { $session = [string]$obj.session_id }
             if ($obj.cwd)        { $cwd     = [string]$obj.cwd }
+
+            # The reset time is somewhere in a rate limit message, but its exact
+            # shape has never been seen rather than guessed at. Saving the next
+            # real one means the parser can be written against fact instead of
+            # assumption. One file, overwritten each time, so it cannot grow.
+            if ($Kind -eq 'limit' -and $env:CLAUDE_NOTIFY_DRYRUN -ne '1') {
+                try {
+                    $dump = Join-Path $env:USERPROFILE '.claude\claude-limit-payload.json'
+                    [System.IO.File]::WriteAllText($dump, $stdin)
+                } catch { }
+            }
         }
     }
 } catch { }
