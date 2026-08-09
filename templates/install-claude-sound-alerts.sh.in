@@ -225,6 +225,14 @@ NTFY_SERVER=$NTFY_SERVER
 # Which kinds to push. Pushing every finished turn to a phone gets old fast.
 NTFY_ALERTS=$NTFY_ALERTS
 
+# Nudge you again if a prompt goes unanswered for this many seconds. 0 is off.
+# Needs the desktop app running: a hook exits at once and cannot wait around.
+ESCALATE_AFTER=0
+
+# Whether the desktop app starts with the machine. The app manages this itself;
+# editing it here does not add or remove the startup entry.
+LAUNCH_AT_LOGIN=0
+
 # ---------------------------------------------------------------------------
 # Per-event settings. One group per alert kind.
 #

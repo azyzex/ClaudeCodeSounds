@@ -88,6 +88,7 @@ in_list() {  # in_list <needle> <comma,list>
 }
 
 LOGFILE="$HOME/.claude/claude-notify.log"
+CLAUDE_DIR_ESC="$HOME/.claude"
 
 # Record what was decided. Every exit path goes through this, so the log and the
 # debug output can never disagree. It never fails the alert: a log that cannot
@@ -529,6 +530,20 @@ PUSHED=no
 if [ -n "$NTFY_TOPIC" ] && [ "${CLAUDE_NOTIFY_DRYRUN:-0}" != "1" ]    && in_list "$KIND" "$NTFY_ALERTS" && command -v curl >/dev/null 2>&1; then
   ( curl -fsS -m 8       -H "Title: $TITLE"       -H "Priority: $([ "$KIND" = "done" ] && echo default || echo high)"       -H "Tags: bell"       -d "$DETAIL"       "$NTFY_SERVER/$NTFY_TOPIC" >/dev/null 2>&1 & ) 2>/dev/null
   PUSHED=queued
+fi
+
+# --- leave a marker for escalation --------------------------------------------
+# A hook exits at once, so it cannot wait to see whether you responded. It just
+# records that a prompt is outstanding; the tray app decides whether to nag.
+# Anything that is not "blocked" means the session moved on, so the marker goes.
+PENDING="$CLAUDE_DIR_ESC/claude-notify-pending"
+if [ "${CLAUDE_NOTIFY_DRYRUN:-0}" != "1" ] && [ -d "$CLAUDE_DIR_ESC" ]; then
+  if [ "$KIND" = "blocked" ]; then
+    { printf '%s|%s
+' "$(date +%s)" "$DETAIL" > "$PENDING"; } 2>/dev/null || true
+  else
+    rm -f "$PENDING" 2>/dev/null || true
+  fi
 fi
 
 # --- report ------------------------------------------------------------------

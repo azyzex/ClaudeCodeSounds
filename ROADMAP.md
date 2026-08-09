@@ -90,10 +90,10 @@ uninstalling the app leaves them working.
 Agreed 2026-08-09. Everything here except escalation is mostly reading state
 that already exists.
 
-- [ ] **Escalation** — re-alert if a blocked prompt goes unanswered for a
+- [x] **Escalation** — re-alert if a blocked prompt goes unanswered for a
       while. The only feature that genuinely needs a resident process, since a
       hook exits at once. The tray now gives it somewhere to live.
-- [ ] **Launch at login**, opt in. Escalation is useless without it.
+- [x] **Launch at login**, opt in. Escalation is useless without it.
 - [ ] **Respect the OS do-not-disturb** — Windows Focus Assist, and the desktop
       equivalents on Linux. `QUIET_HOURS` currently duplicates something the OS
       already knows.

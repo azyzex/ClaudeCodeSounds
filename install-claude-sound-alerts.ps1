@@ -269,6 +269,14 @@ NTFY_SERVER=$($opt['NTFY_SERVER'])
 # Which kinds to push. Pushing every finished turn to a phone gets old fast.
 NTFY_ALERTS=$($opt['NTFY_ALERTS'])
 
+# Nudge you again if a prompt goes unanswered for this many seconds. 0 is off.
+# Needs the desktop app running: a hook exits at once and cannot wait around.
+ESCALATE_AFTER=0
+
+# Whether the desktop app starts with the machine. The app manages this itself;
+# editing it here does not add or remove the startup entry.
+LAUNCH_AT_LOGIN=0
+
 # ---------------------------------------------------------------------------
 # Per-event settings. One group per alert kind.
 #
@@ -851,6 +859,22 @@ if ($opt['NTFY_TOPIC'] -and -not $dryRun -and (Test-InList $Kind $opt['NTFY_ALER
     } catch {
         $pushed = 'failed'
     }
+}
+
+# --- leave a marker for escalation --------------------------------------------
+# A hook exits at once, so it cannot wait to see whether you responded. It just
+# records that a prompt is outstanding; the tray app decides whether to nag.
+# Anything that is not "blocked" means the session moved on, so the marker goes.
+if (-not $dryRun) {
+    try {
+        $pending = Join-Path $env:USERPROFILE '.claude\claude-notify-pending'
+        if ($Kind -eq 'blocked') {
+            $stamp = [int][double]::Parse((Get-Date -UFormat %s))
+            [System.IO.File]::WriteAllText($pending, "$stamp|$detail")
+        } elseif (Test-Path $pending) {
+            Remove-Item $pending -Force -ErrorAction SilentlyContinue
+        }
+    } catch { }
 }
 
 # --- report -------------------------------------------------------------------

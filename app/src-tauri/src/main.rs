@@ -2,6 +2,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod config;
+mod escalate;
 mod hooks;
 
 use serde::Serialize;
@@ -426,10 +427,170 @@ fn build_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
     Ok(())
 }
 
+/// Poll for a prompt that was never answered, and nudge once.
+///
+/// A thread with a slow tick rather than a filesystem watcher: the marker
+/// changes at most a few times an hour, and a 15 second poll is imperceptible
+/// while being far less to go wrong.
+fn start_escalation_watcher(app: tauri::AppHandle) {
+    std::thread::spawn(move || {
+        let mut nudged: Option<u64> = None;
+        loop {
+            std::thread::sleep(std::time::Duration::from_secs(15));
+
+            let Some(dir) = config::claude_dir() else {
+                continue;
+            };
+            let settings = config::effective(&read_conf_text());
+            let after: u64 = settings
+                .get("ESCALATE_AFTER")
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(0);
+
+            let marker = std::fs::read_to_string(escalate::pending_path(&dir)).ok();
+            let now = escalate::now();
+
+            let quiet = settings
+                .get("QUIET_HOURS")
+                .map(|w| {
+                    let t = chrono_free_local_time();
+                    escalate::in_quiet_hours(w, t.0, t.1)
+                })
+                .unwrap_or(false);
+
+            match escalate::decide(marker.as_deref(), now, after, nudged, muted_until(), quiet) {
+                escalate::Action::Nothing => {}
+                escalate::Action::Nudge(waited, message) => {
+                    if let Some((at, _)) = marker.as_deref().and_then(escalate::parse_marker) {
+                        nudged = Some(at);
+                    }
+                    notify_still_waiting(&app, waited, &message);
+                }
+            }
+        }
+    });
+}
+
+/// Local hour and minute, without pulling in a date crate for two numbers.
+fn chrono_free_local_time() -> (u32, u32) {
+    // The platform tools already installed are the cheapest way to get local
+    // time here: adding a dependency to format two integers is not worth it.
+    let out = if is_unix() {
+        Command::new("date").arg("+%H %M").output()
+    } else {
+        Command::new("powershell.exe")
+            .args(["-NoProfile", "-Command", "(Get-Date).ToString('HH mm')"])
+            .output()
+    };
+    let text = out
+        .ok()
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+        .unwrap_or_default();
+    let mut parts = text.split_whitespace();
+    let h = parts.next().and_then(|v| v.parse().ok()).unwrap_or(0);
+    let m = parts.next().and_then(|v| v.parse().ok()).unwrap_or(0);
+    (h, m)
+}
+
+/// The nudge itself: play the blocked alert again, forced past suppression,
+/// since by definition you already missed the polite one.
+fn notify_still_waiting(_app: &tauri::AppHandle, waited: u64, _message: &str) {
+    let Some(dir) = config::claude_dir() else {
+        return;
+    };
+    let mins = waited / 60;
+    let _ = if is_unix() {
+        Command::new("bash")
+            .arg(dir.join("claude-notify.sh"))
+            .arg("blocked")
+            .env("CLAUDE_NOTIFY_FORCE", "1")
+            .env(
+                "CLAUDE_NOTIFY_ESCALATION",
+                format!("still waiting, {} minutes", mins),
+            )
+            .output()
+    } else {
+        Command::new("powershell.exe")
+            .args(["-NoProfile", "-ExecutionPolicy", "Bypass", "-File"])
+            .arg(dir.join("claude-notify.ps1"))
+            .args(["-Kind", "blocked"])
+            .env("CLAUDE_NOTIFY_FORCE", "1")
+            .env(
+                "CLAUDE_NOTIFY_ESCALATION",
+                format!("still waiting, {} minutes", mins),
+            )
+            .output()
+    };
+}
+
+/// Start with the machine, or stop doing so.
+///
+/// Done with the platform's own mechanism rather than a plugin: a registry
+/// value on Windows and a .desktop file on Linux are both a few lines, and
+/// neither needs a dependency that would have to be kept current.
+#[tauri::command]
+fn set_launch_at_login(enable: bool) -> Result<(), String> {
+    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+
+    #[cfg(target_os = "windows")]
+    {
+        let key = r"HKCU\Software\Microsoft\Windows\CurrentVersion\Run";
+        let status = if enable {
+            Command::new("reg")
+                .args(["add", key, "/v", "ClaudeCodeSounds", "/t", "REG_SZ", "/d"])
+                .arg(exe.display().to_string())
+                .arg("/f")
+                .status()
+        } else {
+            Command::new("reg")
+                .args(["delete", key, "/v", "ClaudeCodeSounds", "/f"])
+                .status()
+        };
+        // Deleting an entry that is not there is a success as far as the user
+        // is concerned, so a failed delete is not reported as an error.
+        match status {
+            Ok(_) => {}
+            Err(e) if enable => return Err(e.to_string()),
+            Err(_) => {}
+        }
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        let Some(home) = std::env::var_os("HOME").map(PathBuf::from) else {
+            return Err("could not work out your home directory".into());
+        };
+        let dir = home.join(".config").join("autostart");
+        let file = dir.join("claude-code-sounds.desktop");
+        if enable {
+            std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+            let entry = format!(
+                "[Desktop Entry]
+Type=Application
+Name=Claude Code Sounds
+                 Exec={}
+Terminal=false
+X-GNOME-Autostart-enabled=true
+",
+                exe.display()
+            );
+            std::fs::write(&file, entry).map_err(|e| e.to_string())?;
+        } else {
+            let _ = std::fs::remove_file(&file);
+        }
+    }
+
+    save_settings(BTreeMap::from([(
+        "LAUNCH_AT_LOGIN".to_string(),
+        if enable { "1" } else { "0" }.to_string(),
+    )]))
+}
+
 fn main() {
     tauri::Builder::default()
         .setup(|app| {
             build_tray(app.handle())?;
+            start_escalation_watcher(app.handle().clone());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -438,6 +599,7 @@ fn main() {
             preview,
             recent_log,
             quiet_for,
+            set_launch_at_login,
             set_hooks
         ])
         .run(tauri::generate_context!())

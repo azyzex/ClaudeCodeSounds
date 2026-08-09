@@ -76,6 +76,24 @@
 
       <label class="row">
         <span class="label">
+          Nudge me again after
+          <input type="number" id="ESCALATE_AFTER" min="0" max="3600" step="30" class="num" />
+          seconds
+        </span>
+        <span class="hint">
+          If you never answered a prompt, alert once more. 0 turns it off.
+          Needs the app running, since a hook cannot wait around.
+        </span>
+      </label>
+
+      <label class="row switch-row">
+        <span class="label">Start with the machine</span>
+        <span class="hint">Only matters for nudges and the tray. The alerts work either way.</span>
+        <input type="checkbox" id="LAUNCH_AT_LOGIN" />
+      </label>
+
+      <label class="row">
+        <span class="label">
           Quiet hours
           <input type="text" id="QUIET_HOURS" placeholder="23:00-08:00" class="text" />
         </span>

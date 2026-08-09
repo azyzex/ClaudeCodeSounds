@@ -22,8 +22,10 @@ const PATTERNS = [
 ];
 
 const SWITCHES = ['SUPPRESS_WHEN_FOCUSED', 'PROJECT_PITCH', 'SPEAK', 'TOAST_ON_DONE'];
+// Handled separately: it writes a startup entry as well as the config.
+const LOGIN_SWITCH = 'LAUNCH_AT_LOGIN';
 const TEXTS = ['QUIET_HOURS'];
-const NUMBERS = ['MIN_SECONDS'];
+const NUMBERS = ['MIN_SECONDS', 'ESCALATE_AFTER'];
 
 let state = null;
 let saveTimer = null;
@@ -211,6 +213,18 @@ function bindGeneral() {
     const el = $(id);
     el.addEventListener('change', () => scheduleSave({ [id]: el.checked ? '1' : '0' }));
   }
+
+  // Not a plain config write: this also has to add or remove the platform's
+  // own startup entry, so it goes through a command.
+  $('LAUNCH_AT_LOGIN').addEventListener('change', async (e) => {
+    try {
+      await invoke('set_launch_at_login', { enable: e.target.checked });
+      status(e.target.checked ? 'Will start with the machine' : 'Will not start automatically', 'ok');
+    } catch (err) {
+      status(String(err), 'err');
+      e.target.checked = !e.target.checked;
+    }
+  });
   for (const id of NUMBERS.concat(TEXTS)) {
     const el = $(id);
     el.addEventListener('change', () => scheduleSave({ [id]: el.value.trim() }));
@@ -251,6 +265,7 @@ function fillGeneral() {
   for (const id of SWITCHES) {
     $(id).checked = state.settings[id] === '1';
   }
+  $(LOGIN_SWITCH).checked = state.settings[LOGIN_SWITCH] === '1';
   for (const id of NUMBERS.concat(TEXTS)) {
     $(id).value = state.settings[id] || '';
   }

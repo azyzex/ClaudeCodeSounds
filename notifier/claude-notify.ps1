@@ -442,6 +442,22 @@ if ($opt['NTFY_TOPIC'] -and -not $dryRun -and (Test-InList $Kind $opt['NTFY_ALER
     }
 }
 
+# --- leave a marker for escalation --------------------------------------------
+# A hook exits at once, so it cannot wait to see whether you responded. It just
+# records that a prompt is outstanding; the tray app decides whether to nag.
+# Anything that is not "blocked" means the session moved on, so the marker goes.
+if (-not $dryRun) {
+    try {
+        $pending = Join-Path $env:USERPROFILE '.claude\claude-notify-pending'
+        if ($Kind -eq 'blocked') {
+            $stamp = [int][double]::Parse((Get-Date -UFormat %s))
+            [System.IO.File]::WriteAllText($pending, "$stamp|$detail")
+        } elseif (Test-Path $pending) {
+            Remove-Item $pending -Force -ErrorAction SilentlyContinue
+        }
+    } catch { }
+}
+
 # --- report -------------------------------------------------------------------
 # A zero exit alone cannot distinguish a played sound from a fallback beep, so
 # this is what CI asserts on, and it is the first step in working out why
