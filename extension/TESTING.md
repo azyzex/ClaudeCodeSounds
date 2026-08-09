@@ -1,76 +1,79 @@
 # Testing Earshot for Web
 
 The extension has to tell "Claude is still writing" from "Claude has stopped".
-The only honest way to know how is to look at a real page, so this is written
-against facts rather than assumptions.
-
-There are two jobs here. The first is the one that matters.
+Every selector in it is currently a guess about a page nobody involved has
+inspected. This finds out the truth.
 
 ---
 
-## Job 1: find out what the page actually looks like
+## The only part that matters
 
-**This is the important one, and it needs no extension installed.**
+Four steps, about two minutes. **No extension needs to be installed.**
 
 1. Open a conversation on [claude.ai](https://claude.ai)
-2. Press **F12**, go to the **Console** tab
-3. Paste the whole of [`probe.js`](probe.js) and press Enter
-4. Ask Claude something that takes a while, for example *"write a 500 word essay
-   about the sea"*
-5. **While it is still writing**, run:
+2. Press **F12**, click the **Console** tab
+3. Paste the whole of [`probe.js`](probe.js), press Enter
+4. Type this and press Enter:
 
    ```js
-   earshotProbe('while writing')
+   earshotRun()
    ```
 
-6. **Once it has finished**, run:
+It then tells you what to do: send Claude something slow, and leave it alone.
+When the reply finishes it prints one report. Copy everything between
+`--- Earshot report ---` and `--- end of report ---`.
 
-   ```js
-   earshotProbe('after finishing')
-   ```
+That is the whole job.
 
-7. Copy both blocks of output
+**It never reads message text and sends nothing anywhere.** It records element
+tags, a fixed list of attributes, and which buttons are disabled.
 
-The difference between those two is the whole answer: whatever is present during
-the first and absent in the second is how the extension knows a turn ended.
+### If you would rather do it by hand
 
-The probe reads only element names and attributes. **It never reads message
-text, and it sends nothing anywhere.**
+The pieces are available separately: `earshotProbe('a label')` for a snapshot,
+`earshotWatch()` and `earshotWatchStop()` for the change log.
 
-### If you hit a usage limit
+### Opportunistically
 
-If you ever see the limit message on the web, run this while it is showing:
+Next time you hit a usage limit naturally, run this while the message is
+showing. Do not chase it on purpose:
 
 ```js
 earshotProbe('rate limited')
 ```
 
-That is the hardest state to test on purpose and the most useful to capture.
+---
+
+## What the report answers
+
+- **Which element exists while streaming and not afterwards.** That is how the
+  extension knows a turn ended.
+- **Whether the stop control has a stable `data-testid`.** Those survive
+  redesigns; aria-labels get reworded and translated.
+- **Whether send is a separate button or the same control changing role.** If
+  it is one control, the signal is an attribute changing rather than an element
+  appearing.
+- **Whether `disabled` is set as a property, an attribute, or both.** React
+  often sets the property alone, and an attribute-only check would miss it.
+- **Whether the composer being empty looks the same as a finished turn.** If it
+  does, "send exists" is not a usable signal on its own.
 
 ---
 
-## Job 2: check the extension end to end
+## Checking the extension end to end
 
-Only worth doing after job 1, since the selectors may need correcting first.
+Only worth doing once the selectors are right.
 
-1. Open `chrome://extensions` (or `edge://extensions`)
+1. `chrome://extensions` (or `edge://extensions`)
 2. Turn on **Developer mode**, top right
 3. **Load unpacked**, choose the `extension/` folder
-4. Open a Claude conversation, ask something slow, and switch to another tab
-5. When it finishes you should get a notification and a chime
+4. Ask Claude something slow, switch to another tab
+5. You should get a notification and a chime when it finishes
 6. Click the Earshot icon: the popup lists what it saw
 
-**If nothing happens**, the popup's Recent list is the thing to look at. Empty
-means the page never looked "finished" to it, which is a selector problem and
-exactly what job 1 fixes.
+**If nothing happens**, the popup's Recent list is the thing to check. Empty
+means the page never looked finished to it, which is a selector problem.
 
-This step cannot be automated. `chrome://extensions` is deliberately off limits
-to browser automation, so loading an unpacked extension is always done by hand.
-
----
-
-## What to send back
-
-Anything at all from job 1 is useful, even if it looks like nothing. The most
-useful single thing is the `matched` object from each run, because the selector
-that appears in one and not the other is the one the extension should use.
+This part cannot be automated, and it is not worth trying. `chrome://extensions`
+is deliberately off limits to browser automation, and Claude's own browser
+integration will not drive claude.ai at all: it is blocked at the domain level.
