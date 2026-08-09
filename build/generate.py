@@ -122,6 +122,15 @@ def render(template_path, placeholder, notifier_path):
                     'statusline ps1 line %d starts with a here-string terminator' % i
                 )
         out = out.replace('@@STATUSLINE_PS1@@', sl)
+    if '@@CLI_PS1@@' in out:
+        cli = read('claude-sounds.ps1').replace('\r\n', '\n').rstrip('\n')
+        for i, line in enumerate(cli.split('\n'), 1):
+            if line.startswith("'@"):
+                raise SystemExit(
+                    'claude-sounds.ps1 line %d starts with a here-string '
+                    'terminator, which would end the block early' % i
+                )
+        out = out.replace('@@CLI_PS1@@', cli)
     if '@@SOUNDS@@' in out:
         out = out.replace('@@SOUNDS@@', sound_blob())
     return out.replace('\r\n', '\n')

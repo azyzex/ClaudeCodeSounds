@@ -45,6 +45,7 @@ $notifyScript = Join-Path $claudeDir 'claude-notify.ps1'
 $confFile     = Join-Path $claudeDir 'claude-notify.conf'
 $soundDir     = Join-Path $claudeDir 'claude-sounds'
 $statusLineScript = Join-Path $claudeDir 'claude-sounds-statusline.ps1'
+$cliScript    = Join-Path $claudeDir 'claude-sounds.ps1'
 $settingsPath = Join-Path $claudeDir 'settings.json'
 $marker       = 'claude-notify.ps1'   # how we recognise our own hook entries
 
@@ -417,6 +418,7 @@ if ($Uninstall) {
     Save-Json -Data $settings -Path $settingsPath
     if (Test-Path $notifyScript) { Remove-Item $notifyScript -Force }
     if (Test-Path $statusLineScript) { Remove-Item $statusLineScript -Force }
+    if (Test-Path $cliScript) { Remove-Item $cliScript -Force }
     foreach ($leftover in @('claude-limits.json', 'claude-reset-fired',
                             'claude-limit-reset', 'claude-watch-alive',
                             'claude-notify-pending')) {
@@ -486,6 +488,15 @@ $notifyBody = @'
 
 Set-Content -Path $notifyScript -Value $notifyBody -Encoding utf8
 Write-Ok "wrote claude-notify.ps1"
+
+# ---------------------------------------------------------------- the cli ---
+# A small command for checking on all this from a terminal, which is where
+# people already are. The same commands as the Unix `claude-sounds`.
+$cliBody = @'
+@@CLI_PS1@@
+'@
+Set-Content -Path $cliScript -Value $cliBody -Encoding utf8
+Write-Ok "wrote claude-sounds.ps1"
 
 # --------------------------------------------------------- the status line ---
 # This is what makes the reset alerts possible. Claude Code hands the status

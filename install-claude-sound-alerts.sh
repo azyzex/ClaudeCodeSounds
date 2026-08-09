@@ -1340,6 +1340,8 @@ SOUND_DIR="$CLAUDE_DIR/claude-sounds"
 SETTINGS="$CLAUDE_DIR/settings.json"
 LOGFILE="$CLAUDE_DIR/claude-notify.log"
 LIMITS="$CLAUDE_DIR/claude-limits.json"
+# One file per other surface, kept apart on purpose. See cmd_limits.
+LIMITS_D="$CLAUDE_DIR/claude-limits.d"
 
 bold()  { printf '\033[1m%s\033[0m\n' "$1"; }
 ok()    { printf '  \033[32mok\033[0m    %s\n' "$1"; }
@@ -1603,20 +1605,55 @@ set_conf() {
 }
 
 cmd_limits() {
-  if [ ! -f "$LIMITS" ]; then
-    echo "No limit figures yet. Open Claude Code once so its status line runs."
+  # Every source, not just the one Claude Code writes. Other surfaces drop their
+  # own file in claude-limits.d, tagged with the account they saw, and those are
+  # deliberately not merged: the window is per account, so combining two would
+  # report one account's reset time under the other's name.
+  local files=""
+  [ -f "$LIMITS" ] && files="$LIMITS"
+  if [ -d "$LIMITS_D" ]; then
+    for f in "$LIMITS_D"/*.conf; do
+      [ -f "$f" ] && files="$files $f"
+    done
+  fi
+
+  if [ -z "$files" ]; then
+    echo "No limit figures yet."
+    echo "Open Claude Code once so its status line runs, or a claude.ai tab with"
+    echo "the browser extension installed."
     return 0
   fi
+
   bold "Usage limits"
-  local fp fa wp wa
-  fp=$(sed -n 's/^five_hour_used=//p' "$LIMITS" | tail -1)
-  fa=$(sed -n 's/^five_hour_resets_at=//p' "$LIMITS" | tail -1)
-  wp=$(sed -n 's/^seven_day_used=//p' "$LIMITS" | tail -1)
-  wa=$(sed -n 's/^seven_day_resets_at=//p' "$LIMITS" | tail -1)
-  printf '  %-8s %6s%%  resets %s\n' "5 hour" "${fp:-?}" "$(human_at "$fa")"
-  printf '  %-8s %6s%%  resets %s\n' "7 day"  "${wp:-?}" "$(human_at "$wa")"
-  local upd; upd=$(sed -n 's/^updated=//p' "$LIMITS" | tail -1)
-  [ -n "$upd" ] && dim "last seen $(human_ago "$upd")"
+  local several=0
+  set -- $files
+  [ $# -gt 1 ] && several=1
+
+  for f in $files; do
+    local fp fa wp wa src acct upd
+    fp=$(sed -n 's/^five_hour_used=//p'      "$f" | tail -1)
+    fa=$(sed -n 's/^five_hour_resets_at=//p' "$f" | tail -1)
+    wp=$(sed -n 's/^seven_day_used=//p'      "$f" | tail -1)
+    wa=$(sed -n 's/^seven_day_resets_at=//p' "$f" | tail -1)
+    src=$(sed -n 's/^source=//p'  "$f" | tail -1)
+    acct=$(sed -n 's/^account=//p' "$f" | tail -1)
+    upd=$(sed -n 's/^updated=//p' "$f" | tail -1)
+
+    # Only says where a figure came from when there is more than one, so the
+    # ordinary single-source case stays as quiet as it was.
+    if [ "$several" = "1" ]; then
+      printf '
+'
+      dim "from ${src:-claude code}${acct:+, account $acct}"
+    fi
+    printf '  %-8s %6s%%  resets %s
+' "5 hour" "${fp:-?}" "$(human_at "$fa")"
+    printf '  %-8s %6s%%  resets %s
+' "7 day"  "${wp:-?}" "$(human_at "$wa")"
+    if [ -n "$upd" ]; then
+      dim "last seen $(human_ago "$upd")"
+    fi
+  done
 }
 
 usage() {

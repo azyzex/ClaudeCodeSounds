@@ -258,6 +258,16 @@ The filenames are `chime-glass`, `chime-soft`, `chime-bright`, `chime-low`, `chi
 
 ## The claude-sounds command
 
+On Windows it installs as `claude-sounds.ps1` beside the notifier, so:
+
+```powershell
+& "$env:USERPROFILE\.claude\claude-sounds.ps1" limits
+& "$env:USERPROFILE\.claude\claude-sounds.ps1" mute 1h
+```
+
+Same commands and same output as the Unix version, so a habit learned on one
+machine carries to the other.
+
 Installed alongside the notifier on Linux and macOS, at
 `~/.claude/claude-sounds-cli`.
 

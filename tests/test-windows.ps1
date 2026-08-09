@@ -481,6 +481,53 @@ Write-Host ""
 
 # --------------------------------------------------------------------------
 Write-Host ""
+Write-Host "the claude-sounds command"
+
+$h = New-TempHome
+$env:USERPROFILE = $h
+Invoke-Installer -Home_ $h | Out-Null
+$cli = Join-Path $h '.claude\claude-sounds.ps1'
+Assert (Test-Path $cli) "the cli is installed"
+
+function Invoke-Cli($Cmd) {
+    return (& powershell.exe -NoProfile -ExecutionPolicy Bypass -File $cli -Command $Cmd 2>&1 | Out-String)
+}
+
+$out = Invoke-Cli 'status'
+Assert ($out -match 'notifier installed') "status sees the notifier"
+Assert ($out -match 'hooks registered')   "status sees the hooks"
+
+# With nothing known it must say so rather than print an empty table.
+$out = Invoke-Cli 'limits'
+Assert ($out -match 'No limit figures yet') "limits says so when nothing is known"
+
+# The countdown is the reason any of this exists, so the arithmetic is checked
+# rather than assumed. A cast to int rounds in PowerShell rather than
+# truncating, which once turned 1h59m into "2h 59m", an hour late.
+$stamp = [DateTimeOffset]::Now.ToUnixTimeSeconds()
+$soon = $stamp + 7200
+Set-Content -Path (Join-Path $h '.claude\claude-limits.json') -Encoding ascii -Value @(
+    "updated=$stamp", 'five_hour_used=43', "five_hour_resets_at=$soon")
+$out = Invoke-Cli 'limits'
+Assert ($out -match '43%') "limits shows the percentage"
+Assert ($out -match 'in (1h 59m|2h 0m)') "and counts down correctly, not an hour out"
+
+# A second surface is shown separately, never folded into the first.
+New-Item -ItemType Directory -Force (Join-Path $h '.claude\claude-limits.d') | Out-Null
+Set-Content -Path (Join-Path $h '.claude\claude-limits.d\web.conf') -Encoding ascii -Value @(
+    "updated=$stamp", 'source=web', 'account=a1b2c3', 'five_hour_used=93',
+    "five_hour_resets_at=$soon")
+$out = Invoke-Cli 'limits'
+Assert (($out -match '43%') -and ($out -match '93%')) "both surfaces are shown"
+Assert ($out -match 'account a1b2c3') "and each says which account it saw"
+
+Invoke-Installer -Home_ $h -Uninstall | Out-Null
+Assert (-not (Test-Path $cli)) "uninstall takes the cli with it"
+Remove-Item $h -Recurse -Force -ErrorAction SilentlyContinue
+Write-Host ""
+
+# --------------------------------------------------------------------------
+Write-Host ""
 Write-Host "the watcher counts down from every source, keeping accounts apart"
 
 # There were no watcher tests on Windows at all, which is the platform most of
