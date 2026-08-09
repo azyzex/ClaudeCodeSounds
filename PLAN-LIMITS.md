@@ -142,16 +142,31 @@ without changes.
 
 ## Phase 4: the Claude desktop app
 
-Worth doing regardless of Phase 1, and the only route that covers someone who
-uses neither the terminal nor a browser.
+**Investigated 9 August 2026. Nothing usable, and that is the answer.**
 
-It is an Electron app, so it keeps local state in a known place. The question
-is whether any of it records the limit window. **Read only, no patching of
-their app** — that would break on every update and is not something to ship to
-other people.
+On Windows it is a Store package, so its data is redirected to
+`%LOCALAPPDATA%\Packages\Claude_pzs8sxrjxfjjc\LocalCache\Roaming\Claude`.
+Inside is an ordinary Electron layout. Neither Local Storage nor Session Storage
+mentions a window or a reset time. The one match anywhere is inside an IndexedDB
+**blob**, which is a cached response body: evictable, undocumented, and not a
+shape anything should be built on.
 
-If it does, it becomes a third source feeding the same file, with the same
-account identity rule.
+The route that would work is the one to refuse. The app keeps a session cookie
+in an SQLite store encrypted with DPAPI, and decrypting it to call `/usage`
+ourselves is strictly worse than the `fetch` wrapping already ruled out: it
+would mean taking the user's credentials rather than reading one number. Not
+doing it, and saying so.
+
+### Why this matters less than it first appears
+
+The window is **per account, not per surface**, and the numbers come from
+Anthropic's servers. So it does not matter which surface learns the reset time:
+if Claude Code or a claude.ai tab reads it, the countdown is correct even for a
+window spent entirely in the desktop app.
+
+The gap left is genuinely narrow: a window in which you open neither Claude Code
+nor claude.ai in a browser. For that case there is no cheap, honest mechanism,
+and the README should say so plainly rather than imply full coverage.
 
 ---
 
