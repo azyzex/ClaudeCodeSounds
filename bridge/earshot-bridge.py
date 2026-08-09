@@ -116,7 +116,10 @@ def handle(message):
         return {'ok': False, 'error': 'not an object'}
 
     kind = message.get('kind')
-    if kind not in ALLOWED:
+    # The type check is not redundant: `x in set` raises on an unhashable value,
+    # so a dict here would land in the caller's generic handler. Refused either
+    # way, but it should be refused on purpose rather than by exception.
+    if not isinstance(kind, str) or kind not in ALLOWED:
         return {'ok': False, 'error': 'unknown kind'}
 
     now = time.time()

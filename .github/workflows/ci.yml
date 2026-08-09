@@ -191,6 +191,39 @@ jobs:
         working-directory: app/src-tauri
         run: cargo test
 
+  lint-web:
+    name: web and bridge
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      # The extension has no build step and no dependencies on purpose, so this
+      # is a syntax and shape check rather than a bundler run.
+      - name: Extension syntax and manifest
+        run: |
+          for f in extension/*.js; do node --check "$f"; done
+          python3 - <<'PY'
+          import json, sys
+          m = json.load(open('extension/manifest.json'))
+          assert m['manifest_version'] == 3, 'must be MV3'
+          # The permissions are the security story, so they are asserted rather
+          # than left to review. A broad host permission must never creep in.
+          assert m['host_permissions'] == ['https://claude.ai/*'], m['host_permissions']
+          for banned in ('tabs', 'history', 'cookies', 'downloads', '<all_urls>'):
+              assert banned not in m.get('permissions', []), banned
+              assert banned not in m.get('host_permissions', []), banned
+          assert 'nativeMessaging' in m.get('optional_permissions', []),               'the bridge permission must stay optional'
+          assert 'nativeMessaging' not in m.get('permissions', []),               'the bridge permission must not be required'
+          print('manifest ok:', m['host_permissions'], m['permissions'])
+          PY
+
+      - name: Bridge tests
+        run: python3 tests/test-bridge.py
+
   lint-shell:
     name: lint (shellcheck)
     runs-on: ubuntu-latest
