@@ -359,16 +359,16 @@ If it is not in the tray either, it is not running. Start it again from the Star
 menu, or directly:
 
 ```powershell
-# Windows
-& "$env:LOCALAPPDATA\Programs\claude-code-sounds\claude-code-sounds.exe"
+# Windows. The .msi installs to Program Files under the full product name.
+& "$env:ProgramFiles\Claude Code Sounds\Claude Code Sounds.exe"
 ```
 
 ```bash
 # Linux, if installed from the .deb
 claude-code-sounds
 
-# or, if you kept the AppImage
-./ClaudeCodeSounds.AppImage
+# or, if you kept the AppImage, whatever you named the file
+./claude-code-sounds_*.AppImage
 ```
 
 ## Development

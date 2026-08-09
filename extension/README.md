@@ -31,18 +31,39 @@ It asks for the narrowest permissions that do the job:
 | `https://claude.ai/*` | The only site it runs on. Not `<all_urls>`. |
 | `notifications` | To show one. |
 | `storage` | Your four toggles, and a list of recent alert kinds. |
+| `alarms` | The ten minute timer behind the usage check. |
 | `nativeMessaging` | **Optional**, requested only if you turn on the desktop link. |
 
-It does **not** ask for tabs, history, cookies, downloads, or any other host.
+It does **not** ask for tabs, history, cookies, downloads, or any other host,
+and it does not ask for `webRequest`, `debugger` or `scripting`. The build fails
+if any of those ever appear.
 
 **It never reads your messages.** It watches whether the stop button exists, to
 know when a response is running. The one place it looks at text is deciding
 whether you have hit a limit, and that text is never stored or sent anywhere.
 
-**It makes no network requests.** Not to Anthropic, not to me, not to anyone.
-There is no analytics and no telemetry.
+**It makes exactly one kind of request, and here it is.** While a claude.ai tab
+is open, every ten minutes:
 
-**It consumes no tokens.** It only observes a page you already have open.
+```
+GET https://claude.ai/api/organizations/<your org>/usage
+```
+
+That is the endpoint the page already calls for itself. It is the only reason
+the extension can tell you when your window resets without you first hitting the
+limit. Four values are kept from the reply, two percentages and two reset times.
+Everything else, including every field about money, is discarded.
+
+Nothing goes anywhere else. Not to me, not to a third party. There is no
+analytics and no telemetry.
+
+**It does not intercept anything.** Wrapping `fetch` would have worked and
+needed no extra permission, which is exactly what made it tempting. It was
+refused: it would put this code in the path of every response, including your
+messages. One deliberate request is the smaller ask.
+
+**It consumes no tokens.** The usage endpoint runs no model, so reading it does
+not touch the very limit it reports.
 
 ## The desktop link
 
