@@ -385,3 +385,114 @@ async function main() {
 }
 
 main();
+
+// ---------------------------------------------------------------- usage ----
+// The figures are already on disk, put there by the Claude Code status line and
+// by any other surface that reported in. So "check usage" re-reads a file. It
+// asks nobody anything, which is exactly why it cannot consume the limit it is
+// reporting on.
+
+/** "in 2h 14m", or "any moment" once the time has passed. */
+function untilText(epochSeconds) {
+  const left = epochSeconds * 1000 - Date.now();
+  if (left <= 0) return 'any moment';
+  const mins = Math.floor(left / 60000);
+  if (mins < 60) return `in ${mins}m`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `in ${hours}h ${mins % 60}m`;
+  return `in ${Math.round(hours / 24)} days`;
+}
+
+function agoText(epochSeconds) {
+  const gone = Math.floor((Date.now() - epochSeconds * 1000) / 60000);
+  if (gone < 1) return 'just now';
+  if (gone < 60) return `${gone}m ago`;
+  const hours = Math.floor(gone / 60);
+  if (hours < 24) return `${hours}h ago`;
+  return `${Math.round(hours / 24)} days ago`;
+}
+
+function windowRow(name, w) {
+  if (!w || w.resets_at === null) return null;
+  const row = document.createElement('div');
+  row.className = 'row';
+
+  const label = document.createElement('span');
+  label.className = 'name';
+  label.textContent = name;
+
+  const bar = document.createElement('span');
+  bar.className = 'bar';
+  const fill = document.createElement('i');
+  const pct = typeof w.used === 'number' ? Math.min(100, Math.max(0, w.used)) : 0;
+  fill.style.width = `${pct}%`;
+  bar.append(fill);
+
+  const value = document.createElement('span');
+  value.className = 'pct';
+  value.textContent = typeof w.used === 'number' ? `${w.used}%` : '--';
+
+  const when = document.createElement('span');
+  when.className = 'when';
+  when.textContent = untilText(w.resets_at);
+
+  row.append(label, bar, value, when);
+  return row;
+}
+
+async function showLimits() {
+  const host = document.getElementById('limits');
+  if (!host) return;
+  let sources = [];
+  try {
+    sources = await invoke('read_limits');
+  } catch {
+    // A missing home directory is not worth a scary message.
+  }
+
+  host.textContent = '';
+  if (!sources.length) {
+    const p = document.createElement('p');
+    p.className = 'hint';
+    p.textContent =
+      'Nothing known yet. Open Claude Code once, or a claude.ai tab with the ' +
+      'browser extension, and the times appear here.';
+    host.append(p);
+    return;
+  }
+
+  // Sources are shown separately and never merged: the window is per account,
+  // so combining two would report one account's reset time under the other's
+  // name. The label only appears when there is more than one, so the ordinary
+  // case stays uncluttered.
+  for (const s of sources) {
+    if (sources.length > 1) {
+      const from = document.createElement('div');
+      from.className = 'from';
+      from.textContent = s.account ? `from ${s.source}, account ${s.account}` : `from ${s.source}`;
+      host.append(from);
+    }
+    const five = windowRow('5 hours', s.five_hour);
+    const week = windowRow('7 days', s.seven_day);
+    if (five) host.append(five);
+    if (week) host.append(week);
+
+    if (s.updated) {
+      const seen = document.createElement('div');
+      seen.className = 'from';
+      // Stale figures are worth flagging: nothing has read the numbers in a
+      // while, so a window may have rolled over without anything noticing.
+      const stale = Date.now() - s.updated * 1000 > 6 * 3600 * 1000;
+      if (stale) seen.classList.add('stale');
+      seen.textContent = stale
+        ? `last seen ${agoText(s.updated)}, so this may be out of date`
+        : `last seen ${agoText(s.updated)}`;
+      host.append(seen);
+    }
+  }
+}
+
+document.getElementById('refresh-limits')?.addEventListener('click', showLimits);
+showLimits();
+// The countdown should not go stale while the window sits open.
+setInterval(showLimits, 60000);

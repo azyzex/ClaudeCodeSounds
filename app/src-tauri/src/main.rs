@@ -4,6 +4,7 @@
 mod config;
 mod escalate;
 mod hooks;
+mod limits;
 
 use serde::Serialize;
 use std::collections::BTreeMap;
@@ -586,6 +587,18 @@ X-GNOME-Autostart-enabled=true
     )]))
 }
 
+/// The usage windows, read from disk.
+///
+/// This is the whole of the "check usage" button. It asks nobody anything: the
+/// figures are already on disk, put there by the Claude Code status line and by
+/// any other surface that reported in. Refreshing is re-reading a file, which
+/// is why it costs nothing and cannot touch the limit it reports.
+#[tauri::command]
+fn read_limits() -> Result<Vec<limits::Source>, String> {
+    let dir = config::claude_dir().ok_or("could not work out your home directory")?;
+    Ok(limits::read_all(&dir))
+}
+
 fn main() {
     tauri::Builder::default()
         // Tauri's updater signs releases with its own free keypair, which has
@@ -604,7 +617,8 @@ fn main() {
             recent_log,
             quiet_for,
             set_launch_at_login,
-            set_hooks
+            set_hooks,
+            read_limits
         ])
         .run(tauri::generate_context!())
         .expect("error while running the app");

@@ -175,3 +175,14 @@ footer { max-width: 720px; margin: 18px auto 0; }
 .quiet-buttons { grid-column: 2; grid-row: 1 / span 2; display: flex; gap: 6px; }
 .quiet-buttons button { padding: 5px 10px; font-size: 13px; }
 #quietstate.on { color: var(--accent); font-weight: 500; }
+
+/* The usage rows. A window is a name, a percentage and a countdown, so the
+   layout is three columns and nothing else. */
+.limits .row { display: flex; align-items: baseline; gap: 10px; padding: 3px 0; }
+.limits .name { min-width: 66px; }
+.limits .bar { flex: 1; height: 6px; border-radius: 3px; background: var(--line, #2a2a2a); overflow: hidden; }
+.limits .bar > i { display: block; height: 100%; background: currentColor; }
+.limits .pct { min-width: 42px; text-align: right; font-variant-numeric: tabular-nums; }
+.limits .when { min-width: 96px; text-align: right; opacity: .65; font-variant-numeric: tabular-nums; }
+.limits .from { font-size: 11px; opacity: .5; margin: 8px 0 2px; }
+.limits .stale { color: #d08b28; }

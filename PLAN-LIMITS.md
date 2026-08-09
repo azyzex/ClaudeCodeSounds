@@ -197,6 +197,31 @@ is the platform most of this runs on.
 
 ---
 
+## Considered and rejected: spawning a Claude session to read `/usage`
+
+`/usage` inside a session really does cost nothing, so the idea of having a
+button run it in the background is a reasonable one. It does not survive
+contact with the CLI:
+
+- There is **no `claude usage` subcommand**. `claude --help` lists agents, auth,
+  doctor, mcp, plugin, project and a few others. Nothing reports usage.
+- The only way to reach `/usage` is inside a session, and driving one
+  non-interactively goes through the path that talks to a model. The command is
+  free *because you are already in a session*; the session is the cost, not the
+  command. A button that spawned one to avoid spending tokens could end up
+  spending them.
+
+It is also unnecessary. The status line is handed `rate_limits` on **every
+redraw**, and the extension reads the usage endpoint directly, so the figures
+already arrive free whenever either is used. What was missing was somewhere to
+see them, which is now a panel in the app rather than a session in the
+background.
+
+The same reasoning rules out the other tempting shortcut: reading Claude Code's
+stored credentials to call the usage endpoint from the app. That is the same
+move as decrypting the desktop app's cookie, already refused in Phase 4, and it
+is refused here for the same reason.
+
 ## What is already true
 
 - Reset alerts work today, given Claude Code opened once in the window
