@@ -31,9 +31,18 @@ Nothing leaves your machine unless you switch it on. Specifically:
   public `ntfy.sh`. **The topic name is the only thing protecting them**, so
   anyone who knows it can read and send. Use a long random topic, and do not put
   anything sensitive in an alert.
-- **Nothing is sent to Anthropic.** The usage figures this tool shows are ones
-  Claude Code already hands to its own status line. No API request is made and
-  no tokens are consumed.
+- **The scripts send nothing to Anthropic.** The usage figures they show are
+  ones Claude Code already hands to its own status line. No request is made.
+- **The browser extension makes one request, and only one.** While a claude.ai
+  tab is open, every ten minutes, it reads
+  `https://claude.ai/api/organizations/<your org>/usage`, the same endpoint the
+  page already calls for itself, using the session you are already signed into.
+  It keeps two percentages and two reset times, and discards the rest. That is
+  how it can tell you when your window resets without you first hitting the
+  limit. It reads nothing else and intercepts nothing.
+- **No tokens are consumed anywhere.** The usage endpoint runs no model, so
+  reading it does not touch the limit it reports. Nothing in this project asks
+  Claude to generate anything.
 
 ## Reading Claude Code's session data
 

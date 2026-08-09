@@ -73,15 +73,19 @@ message on stdin, validate it, write to the shared files, exit.
 These are the constraints the project has been built under, and the new pieces
 inherit them.
 
-**No tokens are ever consumed.** Every figure Earshot shows is one the tool was
-already given. The status line integration reads what Claude Code hands it. The
-extension will read what the page already displays. Nothing sends a request to
-generate anything, ever.
+**No tokens are ever consumed.** The status line integration reads what Claude
+Code hands it. The extension reads a usage endpoint that runs no model. Nothing
+here ever asks Claude to generate anything, so nothing Earshot does can eat into
+the limit it is reporting on.
 
-**Nothing leaves your machine unless you switch it on.** No analytics, no
-telemetry, no crash reporting, no phoning home. The only outbound traffic is
-phone push, which is off by default, goes only to the server you name, and is
-documented in the NOTICE.
+**Nothing is collected, ever.** No analytics, no telemetry, no crash reporting,
+no phoning home. Nothing is sent to us, because there is no us to send it to.
+
+**Two things reach the network, both named.** The extension reads claude.ai's
+own usage endpoint every ten minutes while a tab is open, which is the only way
+it can know when your window resets. And phone push, which is off by default and
+goes only to the server you name. Both are documented in the NOTICE. There is
+nothing else.
 
 **The least permission that works.** The extension will request the narrowest
 host permission that does the job, which is claude.ai and nothing else. No
