@@ -1,5 +1,3 @@
-vvvvv
-
 # ClaudeCodeSounds — project overview
 
 A briefing document. It describes what this project is, how it is built, what
