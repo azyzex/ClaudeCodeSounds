@@ -188,6 +188,11 @@ document.getElementById('test')?.addEventListener('click', () => {
 chrome.storage.local.get(null).then((s) => {
   render(s);
   applyEnabled(s.enabled !== false);
+  // Shown so a mismatch with the app can be seen rather than guessed at.
+  // Chrome fixes an unpacked extension's id the first time it is loaded, so one
+  // loaded before the key was added keeps the old one forever.
+  const extid = document.getElementById('extid');
+  if (extid) extid.textContent = `This extension's id: ${chrome.runtime.id}`;
   if (tone) tone.value = s.tone || 'chime';
   if (volume) volume.value = s.volume ?? 60;
   // Shows the last known state without speaking to the app, so opening the

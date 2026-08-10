@@ -250,6 +250,48 @@ fn test_push() -> Result<String, String> {
 /// The topic name is the only thing protecting a push, so it is generated
 /// rather than typed. A name someone chooses themselves is usually their own
 /// name, which is the one thing an attacker would try first.
+/// Open this topic on ntfy, so subscribing is a click rather than typing a name
+/// into a phone.
+///
+/// Not part of the fixed allowlist above, because the address depends on the
+/// topic. It is checked by shape instead: our own server setting, and a topic
+/// of ordinary characters. Nothing else can be reached through it.
+#[tauri::command]
+fn open_ntfy() -> Result<String, String> {
+    let settings = config::effective(&read_conf_text());
+    let topic = settings.get("NTFY_TOPIC").cloned().unwrap_or_default();
+    let topic = topic.trim().to_string();
+    if topic.is_empty() {
+        return Err("Set a topic first.".to_string());
+    }
+    if !topic
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+        || topic.len() > 64
+    {
+        return Err("That topic has characters ntfy will not accept.".to_string());
+    }
+    let server = settings
+        .get("NTFY_SERVER")
+        .cloned()
+        .unwrap_or_else(|| "https://ntfy.sh".to_string());
+    if !server.starts_with("https://") {
+        return Err("The ntfy server must be an https address.".to_string());
+    }
+    let url = format!("{}/{}", server.trim_end_matches('/'), topic);
+
+    let result = if cfg!(target_os = "windows") {
+        spawn("cmd").args(["/C", "start", "", &url]).spawn()
+    } else if cfg!(target_os = "macos") {
+        spawn("open").arg(&url).spawn()
+    } else {
+        spawn("xdg-open").arg(&url).spawn()
+    };
+    result
+        .map(|_| "Opened. Subscribe there, or in the ntfy app on your phone.".to_string())
+        .map_err(|e| format!("could not open your browser: {}", e))
+}
+
 #[tauri::command]
 fn suggest_topic() -> String {
     // Enough randomness that guessing is hopeless, short enough to retype.
@@ -276,7 +318,10 @@ fn suggest_topic() -> String {
 /// extension id. The app is already installed and is already a program the
 /// browser can launch, so it registers itself as the bridge.
 #[tauri::command]
-fn set_bridge(enable: bool) -> Result<String, String> {
+fn set_bridge(enable: bool, extension_id: Option<String>) -> Result<String, String> {
+    if let Some(id) = extension_id.filter(|s| !s.trim().is_empty()) {
+        bridge::set_trusted_id(&id)?;
+    }
     if enable {
         bridge::install()
     } else {
@@ -824,7 +869,8 @@ fn main() {
             set_bridge,
             bridge_status,
             test_push,
-            suggest_topic
+            suggest_topic,
+            open_ntfy
         ])
         .run(tauri::generate_context!())
         .expect("error while running the app");

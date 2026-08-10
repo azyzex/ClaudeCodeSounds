@@ -98,11 +98,37 @@ fn manifest_json(program: &str) -> String {
         HOST_NAME,
         // The path needs JSON escaping, which on Windows means every backslash.
         serde_json::to_string(program).unwrap_or_else(|_| "\"\"".to_string()),
-        EXTENSION_ID
+        trusted_id()
     )
 }
 
 /// Tell the browsers on this machine that the bridge exists.
+/// Whichever id we were told to trust, falling back to the pinned one.
+///
+/// The pinned id is right for a fresh install, but Chrome assigns an unpacked
+/// extension its id the first time it is loaded and keeps it. An extension
+/// loaded before the key existed therefore has a different one, and the
+/// allowlist would never match. Rather than telling people to remove and
+/// re-add it, the app takes the id it is given.
+fn trusted_id() -> String {
+    claude_dir()
+        .map(|d| d.join("earshot-extension-id"))
+        .and_then(|p| std::fs::read_to_string(p).ok())
+        .map(|s| s.trim().to_string())
+        .filter(|s| s.len() == 32 && s.chars().all(|c| c.is_ascii_lowercase()))
+        .unwrap_or_else(|| EXTENSION_ID.to_string())
+}
+
+pub fn set_trusted_id(id: &str) -> Result<(), String> {
+    let id = id.trim();
+    if id.len() != 32 || !id.chars().all(|c| c.is_ascii_lowercase()) {
+        return Err("That does not look like an extension id.".to_string());
+    }
+    let dir = claude_dir().ok_or("no home directory")?;
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    std::fs::write(dir.join("earshot-extension-id"), id).map_err(|e| e.to_string())
+}
+
 pub fn install() -> Result<String, String> {
     let exe = std::env::current_exe()
         .map_err(|e| format!("could not find this program on disk: {}", e))?;
@@ -366,7 +392,7 @@ pub fn run_host() {
     // enforces that before any of this code runs. Checking again costs nothing
     // and means a manifest edited by hand cannot quietly widen the door.
     if let Some(origin) = calling_origin() {
-        if !origin.contains(EXTENSION_ID) {
+        if !origin.contains(trusted_id().as_str()) {
             return;
         }
     }
@@ -442,7 +468,7 @@ pub fn status() -> Status {
 
     Status {
         installed: !manifests.is_empty(),
-        extension_id: EXTENSION_ID.to_string(),
+        extension_id: trusted_id(),
         manifests,
         registered: registry_present(),
         program,

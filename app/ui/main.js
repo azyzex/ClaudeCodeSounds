@@ -63,6 +63,14 @@ function applyMaster(on) {
     if (card.classList.contains('master-card')) continue;
     card.classList.toggle('off', !on);
   }
+  // Everything below going inert with nothing said about why is how a dead
+  // button gets mistaken for a broken one. It is stated instead.
+  note(
+    'master-note',
+    on
+      ? 'Turns everything off without removing anything. Your settings, sounds and phone topic are all kept.'
+      : 'Alerts are off, so everything below is inactive until you switch this back on. Nothing has been removed.'
+  );
 }
 
 const $ = (id) => document.getElementById(id);
@@ -440,12 +448,37 @@ async function main() {
   // above it and says so.
   const master = document.getElementById('master');
   if (master) {
+    // On unless the hooks are genuinely absent. Alerts existing is the point of
+    // the app, so that is the state it opens in.
     master.checked = state.installed > 0;
     applyMaster(master.checked);
-    master.addEventListener('change', () => busy(master, async () => {
-      await setHooks(master.checked);
-      applyMaster(master.checked);
-    }));
+    const confirmOff = document.getElementById('confirm-off');
+    master.addEventListener('change', () => {
+      if (!master.checked) {
+        // Turning everything off is worth a question. Turning it back on is
+        // not, so only one direction asks.
+        master.checked = true;
+        confirmOff?.showModal();
+        return;
+      }
+      busy(master, async () => {
+        await setHooks(true);
+        applyMaster(true);
+      });
+    });
+    document.getElementById('confirm-off-no')?.addEventListener('click', () => {
+      confirmOff?.close();
+      master.checked = true;
+      applyMaster(true);
+    });
+    document.getElementById('confirm-off-yes')?.addEventListener('click', () => {
+      confirmOff?.close();
+      master.checked = false;
+      busy(master, async () => {
+        await setHooks(false);
+        applyMaster(false);
+      });
+    });
   }
 
   document.getElementById('ntfy-suggest')?.addEventListener('click', (e) =>
@@ -459,6 +492,17 @@ async function main() {
       await invoke('save_settings', { changes: { NTFY_TOPIC: topic } });
       state.settings.NTFY_TOPIC = topic;
       note('ntfy-result', 'Topic saved. Subscribe to it in the ntfy app on your phone.');
+    })
+  );
+
+  document.getElementById('ntfy-subscribe')?.addEventListener('click', (e) =>
+    busy(e.target, async () => {
+      note('ntfy-result', 'Opening...');
+      try {
+        note('ntfy-result', await invoke('open_ntfy'));
+      } catch (err) {
+        note('ntfy-result', String(err));
+      }
     })
   );
 
@@ -713,7 +757,9 @@ async function showBridge() {
       ? 'A usage reading from the browser has arrived.'
       : 'No usage reading from the browser yet. Open a claude.ai tab with the extension on.'
   );
-  lines.push(`Extension id: ${s.extension_id}`);
+  lines.push(`Trusting extension id: ${s.extension_id}`);
+  const idField = document.getElementById('extension-id');
+  if (idField && !idField.value) idField.value = s.extension_id;
   for (const m of s.manifests) lines.push(m);
 
   host.textContent = '';

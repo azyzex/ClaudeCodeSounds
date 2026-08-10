@@ -25,8 +25,18 @@
     <section class="card master-card">
       <label class="row master-row">
         <span class="label">Alerts</span>
-        <input type="checkbox" id="master" />
+        <span class="switch"><input type="checkbox" id="master" /><span class="slider"></span></span>
       </label>
+
+      <dialog id="confirm-off">
+        <h2>Turn all alerts off?</h2>
+        <p>You will stop hearing anything from Claude Code until you switch it back on.</p>
+        <p class="muted">Nothing is removed. Every setting, sound and your phone topic are kept.</p>
+        <div class="about-links">
+          <button id="confirm-off-yes" class="ghost">Turn them off</button>
+          <button id="confirm-off-no">Keep them on</button>
+        </div>
+      </dialog>
       <p class="hint" id="master-note">
         Turns everything off without removing anything. Your settings, sounds
         and phone topic are all kept, and switching back on restores them.
@@ -68,6 +78,7 @@
 
       <div class="about-links">
         <button id="ntfy-suggest" class="ghost">Generate a safe topic</button>
+        <button id="ntfy-subscribe" class="ghost">Subscribe on this device</button>
         <button id="ntfy-test" class="ghost">Send a test push</button>
       </div>
       <p class="hint" id="ntfy-result"></p>
@@ -90,6 +101,16 @@
       <p class="hint" id="bridge-note">
         Turn this on, then install the extension in Chrome and switch on
         &ldquo;Send to the desktop app&rdquo; there.
+      </p>
+
+      <label class="row">
+        <span class="label">Extension id</span>
+        <input type="text" id="extension-id" spellcheck="false" autocomplete="off" />
+      </label>
+      <p class="hint">
+        Only needed if the extension shows a different id to the one below.
+        Chrome fixes an unpacked extension's id the first time it loads, so one
+        installed earlier keeps its original.
       </p>
 
       <div id="bridge-detail" class="detail muted mono"></div>
