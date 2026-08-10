@@ -90,7 +90,13 @@ function updateBadge(five) {
     chrome.action.setBadgeText({ text: `${pct}` });
     // Green until it matters, amber when the end is in sight, red when
     // starting something long is a bad idea.
-    const colour = pct >= 90 ? '#c0392b' : pct >= 70 ? '#c77d0a' : '#2f7d32';
+    // Four steps rather than three: the jump from "fine" to "stop" was too
+    // sudden to be useful while you are deciding whether to start something.
+    const colour =
+      pct >= 100 ? '#c0392b' :      // red, it is gone
+      pct >= 90 ? '#d2691e' :       // dark orange, wrap up
+      pct >= 70 ? '#e6c34a' :       // light yellow, worth knowing
+      '#2f7d32';                    // green
     chrome.action.setBadgeBackgroundColor({ color: colour });
     chrome.action.setTitle({
       title: `Earshot - ${pct}% of your 5 hour window used`,
@@ -98,6 +104,36 @@ function updateBadge(five) {
   } catch {
     // A badge is a nicety. Never let it break the alerting.
   }
+}
+
+// Warn once as the window fills, so there is a chance to wrap up rather than
+// being cut off mid-task. That is the failure this whole project exists to
+// prevent, and until now nothing said anything on the way up.
+const WARN_AT = 80;
+
+async function warnIfNearLimit(five) {
+  if (!five || typeof five.utilization !== 'number') return;
+  const pct = Math.round(five.utilization);
+  const { warnedFor } = await chrome.storage.local.get({ warnedFor: null });
+  // Keyed by the window's own reset time, so it warns once per window and
+  // starts fresh when a new one begins rather than staying quiet forever.
+  const key = five.resets_at || 'unknown';
+  if (pct < WARN_AT) {
+    // Dropped as soon as usage falls back, which means the window rolled over.
+    if (warnedFor) await chrome.storage.local.set({ warnedFor: null });
+    return;
+  }
+  if (warnedFor === key) return;
+  await chrome.storage.local.set({ warnedFor: key });
+
+  const { enabled, notify } = await chrome.storage.local.get({ enabled: true, notify: true });
+  if (!enabled || !notify) return;
+  chrome.notifications.create('', {
+    type: 'basic',
+    iconUrl: 'icons/128x128.png',
+    title: `${pct}% of your 5 hour window used`,
+    message: 'Worth finishing what you are on rather than starting something long.',
+  });
 }
 
 function usableWindow(w) {
@@ -130,6 +166,7 @@ async function pollUsage() {
   if (!five && !week) return;
 
   updateBadge(five);
+  await warnIfNearLimit(five);
 
   const account = await accountTag(org);
   await chrome.storage.local.set({

@@ -84,12 +84,47 @@ chrome.runtime.sendMessage({ type: 'earshot-poll-now' }, () => {
   chrome.storage.local.get(null).then(render);
 });
 
+/** Grey out everything the master switch controls. */
+function applyEnabled(on) {
+  const box = document.getElementById('settings');
+  if (box) box.classList.toggle('off', !on);
+  for (const el of document.querySelectorAll('#settings input, #settings button')) {
+    el.disabled = !on;
+  }
+}
+
+document.getElementById('test')?.addEventListener('click', () => {
+  const out = document.getElementById('testresult');
+  if (out) out.textContent = 'Playing...';
+  chrome.runtime.sendMessage({ type: 'earshot-test' }, (r) => {
+    if (!out) return;
+    if (chrome.runtime.lastError) {
+      out.textContent = 'The extension is not running. Reload it and try again.';
+      return;
+    }
+    if (!r?.ok) {
+      out.textContent = `Could not: ${r?.error || 'unknown reason'}`;
+      return;
+    }
+    // Saying which half ran matters: silence with sound turned off is correct,
+    // and silence with it turned on is a fault.
+    const did = [r.played && 'sound', r.notified && 'notification'].filter(Boolean);
+    out.textContent = did.length
+      ? `Sent a ${did.join(' and a ')}. Seen nothing? Check Windows notification settings.`
+      : 'Both sound and notification are turned off, so nothing was sent.';
+  });
+});
+
 chrome.storage.local.get(null).then((s) => {
   render(s);
+  applyEnabled(s.enabled !== false);
   for (const k of KEYS) {
     const el = document.getElementById(k);
     el.checked = Boolean(s[k]);
-    el.addEventListener('change', () => chrome.storage.local.set({ [k]: el.checked }));
+    el.addEventListener('change', () => {
+      chrome.storage.local.set({ [k]: el.checked });
+      if (k === 'enabled') applyEnabled(el.checked);
+    });
   }
   const host = document.getElementById('recent');
   const recent = s.recent || [];

@@ -5,19 +5,29 @@
 
 <h1>
   <a href="https://github.com/azyzex/ClaudeCodeSounds" target="_blank" rel="noreferrer">Earshot</a>
-  <span class="by">by <a id="author" href="https://github.com/azyzex" target="_blank" rel="noreferrer">Azyzex</a></span>
+  <span class="by">by <a id="author" href="https://www.linkedin.com/in/mohamed-aziz-guenni/" target="_blank" rel="noreferrer">Azyzex</a></span>
 </h1>
 
-<label class="row"><span>Alerts on</span><input type="checkbox" id="enabled"></label>
-<label class="row"><span>Play a sound</span><input type="checkbox" id="sound"></label>
-<label class="row"><span>Show a notification</span><input type="checkbox" id="notify"></label>
-<label class="row">
-  <span>Send to the desktop app</span>
-  <input type="checkbox" id="bridge">
+<label class="row master">
+  <span>Alerts</span>
+  <input type="checkbox" id="enabled" class="big">
 </label>
-<p class="hint" id="bridgehint">
-  Turn this on in the desktop app too, under Browser. Nothing leaves your machine.
-</p>
+
+<!-- Everything below answers to the switch above. Greying it out says that
+     plainly, rather than leaving settings that look live but do nothing. -->
+<div id="settings">
+  <label class="row"><span>Play a sound</span><input type="checkbox" id="sound"></label>
+  <label class="row"><span>Show a notification</span><input type="checkbox" id="notify"></label>
+  <label class="row">
+    <span>Send to the desktop app</span>
+    <input type="checkbox" id="bridge">
+  </label>
+  <p class="hint" id="bridgehint">
+    Turn this on in the desktop app too, under Browser. Nothing leaves your machine.
+  </p>
+  <button id="test">Test an alert</button>
+  <p class="hint" id="testresult"></p>
+</div>
 
 <div class="hd">Usage</div>
 <div id="limits"><div class="ev"><span>checking...</span></div></div>

@@ -20,3 +20,14 @@ h2 { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; opacity:
 h1 a { color: inherit; text-decoration: none; }
 h1 a:hover { text-decoration: underline; }
 .dim { opacity: .55; }
+
+/* The master switch reads as the title of everything under it. */
+.row.master span { font-size: 1.05em; font-weight: 600; }
+input.big { transform: scale(1.35); transform-origin: right center; }
+
+/* Settings that cannot do anything should not look as though they can. */
+#settings.off { opacity: .4; }
+#settings.off * { cursor: not-allowed; }
+
+#test { width: 100%; margin-top: .5rem; padding: .4rem; cursor: pointer; }
+#testresult:empty { display: none; }

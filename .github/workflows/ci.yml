@@ -236,7 +236,13 @@ jobs:
           assert 'nativeMessaging' not in m.get('permissions', []),               'the bridge permission must not be required'
           # The usage poller must never grow into request interception: that
           # would put the extension in the path of message content.
-          for banned in ('webRequest', 'webRequestBlocking', 'debugger', 'scripting'):
+          #
+          # 'scripting' is deliberately not on this list. It was, and that was
+          # too broad: it only allows running our own content script in a page
+          # we already hold host permission for, which content_scripts does
+          # anyway. Banning it stopped the extension working in a tab that was
+          # already open, which is a real bug in exchange for no real safety.
+          for banned in ('webRequest', 'webRequestBlocking', 'debugger', 'tabs'):
               assert banned not in m.get('permissions', []), banned
           print('manifest ok:', m['host_permissions'], m['permissions'])
           PY

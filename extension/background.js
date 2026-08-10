@@ -93,13 +93,19 @@ chrome.runtime.onMessage.addListener((msg, sender) => {
 
     const t = TEXT[kind];
     if (s.notify) {
-      chrome.notifications.create('', {
-        type: 'basic',
-        iconUrl: 'icons/128x128.png',
-        title: t.title,
-        message: t.body,
-        silent: s.sound,          // the tone is ours, so do not double up
-      });
+      chrome.notifications.create(
+        '',
+        {
+          type: 'basic',
+          iconUrl: 'icons/128x128.png',
+          title: t.title,
+          message: t.body,
+          silent: s.sound,        // the tone is ours, so do not double up
+        },
+        (id) => {
+          if (id) tabForNotification.set(id, sender.tab.id);
+        }
+      );
     }
     if (s.sound) play(kind);
     if (s.bridge) toBridge({ source: 'web', kind, at: msg.at });
@@ -112,6 +118,68 @@ chrome.runtime.onMessage.addListener((msg, sender) => {
   });
 });
 
-chrome.runtime.onInstalled.addListener(() => {
-  chrome.storage.local.get(DEFAULTS).then((s) => chrome.storage.local.set(s));
+chrome.runtime.onInstalled.addListener(async () => {
+  await chrome.storage.local.get(DEFAULTS).then((s) => chrome.storage.local.set(s));
+  await injectIntoOpenTabs();
+});
+
+/** Put the watcher into claude.ai tabs that were already open.
+ *
+ * A content script is only placed in pages loaded after the extension is, so
+ * installing it while a conversation sits open meant nothing was watching that
+ * conversation and the first thing anyone tried appeared to do nothing at all.
+ */
+async function injectIntoOpenTabs() {
+  try {
+    const tabs = await chrome.tabs.query({ url: 'https://claude.ai/*' });
+    for (const tab of tabs) {
+      chrome.scripting
+        .executeScript({ target: { tabId: tab.id }, files: ['content.js'] })
+        .catch(() => {
+          // A tab mid-navigation, or one Chrome will not script. Not worth
+          // saying anything about: the next page load covers it.
+        });
+    }
+  } catch {
+    /* nothing to do */
+  }
+}
+
+// Clicking the notification should take you to the conversation it was about,
+// which is the only thing anyone wants to do next.
+const tabForNotification = new Map();
+
+chrome.notifications.onClicked.addListener((id) => {
+  const tabId = tabForNotification.get(id);
+  chrome.notifications.clear(id);
+  if (tabId === undefined) return;
+  // update() on a known id needs no extra permission; reading a tab's url
+  // would, and is not needed for this.
+  chrome.tabs.update(tabId, { active: true }).catch(() => {});
+  chrome.tabs.get(tabId).then((t) => chrome.windows.update(t.windowId, { focused: true })).catch(() => {});
+});
+
+/** Play one alert now, so the setup can be proven without waiting for Claude. */
+async function runTest() {
+  const s = await settings();
+  const t = TEXT.done;
+  if (s.notify) {
+    chrome.notifications.create('', {
+      type: 'basic',
+      iconUrl: 'icons/128x128.png',
+      title: 'Earshot is working',
+      message: 'This is what an alert looks like.',
+      silent: s.sound,
+    });
+  }
+  if (s.sound) await play('done');
+  return { ok: true, notified: s.notify, played: s.sound };
+}
+
+chrome.runtime.onMessage.addListener((msg, _sender, reply) => {
+  if (!msg || msg.type !== 'earshot-test') return undefined;
+  runTest()
+    .then(reply)
+    .catch((e) => reply({ ok: false, error: String(e) }));
+  return true;
 });
