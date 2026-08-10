@@ -29,6 +29,24 @@ struct AppState {
     muted_until: Option<u64>,
 }
 
+/// Start a program without a console window blinking on screen.
+///
+/// A GUI app on Windows has no console, so every process it starts is given a
+/// brand new one, which appears and vanishes. With a watcher waking every
+/// fifteen seconds that is a window flashing on someone's desk all day.
+///
+/// Every spawn in this app goes through here, so a future one cannot forget.
+fn spawn(program: &str) -> Command {
+    let mut command = Command::new(program);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        // CREATE_NO_WINDOW
+        command.creation_flags(0x0800_0000);
+    }
+    command
+}
+
 fn is_unix() -> bool {
     cfg!(not(target_os = "windows"))
 }
@@ -109,7 +127,7 @@ fn preview(kind: String) -> Result<String, String> {
     }
 
     let output = if is_unix() {
-        Command::new("bash")
+        spawn("bash")
             .arg(dir.join("claude-notify.sh"))
             .arg(&kind)
             .env("CLAUDE_NOTIFY_DEBUG", "1")
@@ -117,7 +135,7 @@ fn preview(kind: String) -> Result<String, String> {
             .env("CLAUDE_NOTIFY_FORCE", "1")
             .output()
     } else {
-        Command::new("powershell.exe")
+        spawn("powershell.exe")
             .args(["-NoProfile", "-ExecutionPolicy", "Bypass", "-File"])
             .arg(dir.join("claude-notify.ps1"))
             .args(["-Kind", &kind])
@@ -134,7 +152,7 @@ fn debounce_stamp() -> Option<PathBuf> {
     let tmp = std::env::temp_dir();
     if is_unix() {
         // Namespaced by uid, matching the shell notifier.
-        let uid = Command::new("id")
+        let uid = spawn("id")
             .arg("-u")
             .output()
             .ok()
@@ -480,13 +498,22 @@ fn start_escalation_watcher(app: tauri::AppHandle) {
             let marker = std::fs::read_to_string(escalate::pending_path(&dir)).ok();
             let now = escalate::now();
 
-            let quiet = settings
-                .get("QUIET_HOURS")
-                .map(|w| {
-                    let t = chrono_free_local_time();
-                    escalate::in_quiet_hours(w, t.0, t.1)
-                })
-                .unwrap_or(false);
+            // Only ask what time it is when the answer can change something.
+            // `decide` returns Nothing without a marker or with escalation off,
+            // so reading the clock in those cases was pure waste, and on
+            // Windows reading it means starting a process. Fifteen seconds
+            // apart, all day, for a question nobody had asked.
+            let quiet = if marker.is_some() && after > 0 {
+                settings
+                    .get("QUIET_HOURS")
+                    .map(|w| {
+                        let t = chrono_free_local_time();
+                        escalate::in_quiet_hours(w, t.0, t.1)
+                    })
+                    .unwrap_or(false)
+            } else {
+                false
+            };
 
             match escalate::decide(marker.as_deref(), now, after, nudged, muted_until(), quiet) {
                 escalate::Action::Nothing => {}
@@ -506,9 +533,9 @@ fn chrono_free_local_time() -> (u32, u32) {
     // The platform tools already installed are the cheapest way to get local
     // time here: adding a dependency to format two integers is not worth it.
     let out = if is_unix() {
-        Command::new("date").arg("+%H %M").output()
+        spawn("date").arg("+%H %M").output()
     } else {
-        Command::new("powershell.exe")
+        spawn("powershell.exe")
             .args(["-NoProfile", "-Command", "(Get-Date).ToString('HH mm')"])
             .output()
     };
@@ -530,7 +557,7 @@ fn notify_still_waiting(_app: &tauri::AppHandle, waited: u64, _message: &str) {
     };
     let mins = waited / 60;
     let _ = if is_unix() {
-        Command::new("bash")
+        spawn("bash")
             .arg(dir.join("claude-notify.sh"))
             .arg("blocked")
             .env("CLAUDE_NOTIFY_FORCE", "1")
@@ -540,7 +567,7 @@ fn notify_still_waiting(_app: &tauri::AppHandle, waited: u64, _message: &str) {
             )
             .output()
     } else {
-        Command::new("powershell.exe")
+        spawn("powershell.exe")
             .args(["-NoProfile", "-ExecutionPolicy", "Bypass", "-File"])
             .arg(dir.join("claude-notify.ps1"))
             .args(["-Kind", "blocked"])
@@ -566,13 +593,13 @@ fn set_launch_at_login(enable: bool) -> Result<(), String> {
     {
         let key = r"HKCU\Software\Microsoft\Windows\CurrentVersion\Run";
         let status = if enable {
-            Command::new("reg")
+            spawn("reg")
                 .args(["add", key, "/v", "ClaudeCodeSounds", "/t", "REG_SZ", "/d"])
                 .arg(exe.display().to_string())
                 .arg("/f")
                 .status()
         } else {
-            Command::new("reg")
+            spawn("reg")
                 .args(["delete", key, "/v", "ClaudeCodeSounds", "/f"])
                 .status()
         };
