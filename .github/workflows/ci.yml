@@ -170,6 +170,22 @@ jobs:
           key: ${{ runner.os }}-cargo-${{ hashFiles('app/src-tauri/Cargo.toml') }}
           restore-keys: ${{ runner.os }}-cargo-
 
+      # The release workflow names its assets from package.json while the
+      # binary is built from tauri.conf.json. When those disagree the build is
+      # correct and the filename lies about it, which is worse than either.
+      - name: The app's three versions agree
+        if: runner.os == 'Linux'
+        run: |
+          python3 - <<'PY'
+          import json, re
+          pkg = json.load(open('app/package.json'))['version']
+          conf = json.load(open('app/src-tauri/tauri.conf.json'))['version']
+          cargo = re.search(r'(?m)^version = "([^"]+)"',
+                            open('app/src-tauri/Cargo.toml').read()).group(1)
+          assert pkg == conf == cargo,               'package.json %s, tauri.conf.json %s, Cargo.toml %s' % (pkg, conf, cargo)
+          print('all three at', pkg)
+          PY
+
       - name: Icons are reproducible from build/make-icons.py
         if: runner.os == 'Linux'
         run: |
