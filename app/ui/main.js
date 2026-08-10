@@ -329,8 +329,16 @@ async function renderLog() {
   let entries = [];
   try {
     entries = await invoke('recent_log', { limit: 12 });
-  } catch {
-    return;                       // the log is a nicety, never a failure
+  } catch (e) {
+    // The log is a nicety rather than a failure, so this does not interrupt
+    // anything. It does say so, though: returning quietly left whatever was
+    // already on screen, so a stale list looked like a current one.
+    host.textContent = '';
+    const p = document.createElement('p');
+    p.className = 'muted';
+    p.textContent = `Could not read the log: ${String(e)}`;
+    host.append(p);
+    return;
   }
   host.textContent = '';
   if (entries.length === 0) {
