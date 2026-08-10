@@ -71,6 +71,35 @@ async function findOrg() {
   }
 }
 
+/** Put the number on the toolbar icon.
+ *
+ * The whole point of the extension is not having to go and look. A badge is the
+ * one place a number can live where checking it costs nothing at all, and it
+ * needs no permission: an extension may always draw on its own icon.
+ *
+ * The percentage rather than the time left, because the percentage is what
+ * decides whether to start something big, and the time is one click away.
+ */
+function updateBadge(five) {
+  try {
+    if (!five || typeof five.utilization !== 'number') {
+      chrome.action.setBadgeText({ text: '' });
+      return;
+    }
+    const pct = Math.round(five.utilization);
+    chrome.action.setBadgeText({ text: `${pct}` });
+    // Green until it matters, amber when the end is in sight, red when
+    // starting something long is a bad idea.
+    const colour = pct >= 90 ? '#c0392b' : pct >= 70 ? '#c77d0a' : '#2f7d32';
+    chrome.action.setBadgeBackgroundColor({ color: colour });
+    chrome.action.setTitle({
+      title: `Earshot - ${pct}% of your 5 hour window used`,
+    });
+  } catch {
+    // A badge is a nicety. Never let it break the alerting.
+  }
+}
+
 function usableWindow(w) {
   if (!w || typeof w.utilization !== 'number' || typeof w.resets_at !== 'string') return null;
   return { utilization: w.utilization, resets_at: w.resets_at };
@@ -99,6 +128,8 @@ async function pollUsage() {
   const five = usableWindow(body.five_hour);
   const week = usableWindow(body.seven_day);
   if (!five && !week) return;
+
+  updateBadge(five);
 
   const account = await accountTag(org);
   await chrome.storage.local.set({
