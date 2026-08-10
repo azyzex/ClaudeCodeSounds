@@ -22,6 +22,17 @@
       <button id="install" class="primary">Install the alerts</button>
     </section>
 
+    <section class="card master-card">
+      <label class="row master-row">
+        <span class="label">Alerts</span>
+        <input type="checkbox" id="master" />
+      </label>
+      <p class="hint" id="master-note">
+        Turns everything off without removing anything. Your settings, sounds
+        and phone topic are all kept, and switching back on restores them.
+      </p>
+    </section>
+
     <section class="card">
       <h2>Usage</h2>
       <p class="hint">
@@ -32,6 +43,34 @@
         <p class="hint">Nothing known yet.</p>
       </div>
       <button id="refresh-limits" class="ghost">Check usage</button>
+    </section>
+
+    <section class="card">
+      <h2>Phone</h2>
+      <p class="hint">
+        Alerts can be pushed to your phone through
+        <span class="mono">ntfy</span>, which is free and needs no account. Put
+        a topic here, subscribe to the same topic in the ntfy app, and that is
+        the whole setup.
+      </p>
+
+      <label class="row">
+        <span class="label">Topic</span>
+        <input type="text" id="NTFY_TOPIC" spellcheck="false" autocomplete="off" />
+      </label>
+
+      <p class="hint warn">
+        The topic name is the only thing protecting it. There is no password, so
+        anyone who knows the name can read your alerts and send you fake ones.
+        Use the generated one rather than your own name, and keep anything
+        private out of alert text.
+      </p>
+
+      <div class="about-links">
+        <button id="ntfy-suggest" class="ghost">Generate a safe topic</button>
+        <button id="ntfy-test" class="ghost">Send a test push</button>
+      </div>
+      <p class="hint" id="ntfy-result"></p>
     </section>
 
     <section class="card">
@@ -167,6 +206,23 @@
         else alone. Your settings file is kept, in case you reinstall.
       </p>
       <button id="uninstall">Remove the alerts</button>
+
+      <dialog id="confirm-remove">
+        <h2>Remove the alerts?</h2>
+        <p>
+          This takes the hooks out of <code>settings.json</code>. You will stop
+          getting any alerts from Claude Code until you install them again.
+        </p>
+        <p class="muted">
+          Your settings file, your sounds and your phone topic are all kept. If
+          you only want quiet for a while, close this and use the switch at the
+          top instead.
+        </p>
+        <div class="about-links">
+          <button id="confirm-remove-yes" class="ghost">Remove them</button>
+          <button id="confirm-remove-no">Keep them</button>
+        </div>
+      </dialog>
     </section>
   </main>
 

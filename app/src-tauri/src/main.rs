@@ -188,11 +188,6 @@ fn open_url(url: String) -> Result<(), String> {
         .map_err(|e| format!("could not open your browser: {}", e))
 }
 
-/// Connect or disconnect the browser extension.
-///
-/// This is the whole of what used to be a terminal command and a copied
-/// extension id. The app is already installed and is already a program the
-/// browser can launch, so it registers itself as the bridge.
 /// What the browser link looks like from here, in detail.
 ///
 /// Added because a switch that only says "on" is no use when it is on and
@@ -202,6 +197,84 @@ fn bridge_status() -> bridge::Status {
     bridge::status()
 }
 
+/// Send one push, so a phone setup can be proven rather than hoped for.
+///
+/// It goes through the notifier already installed, exactly as a real alert
+/// would, so what this proves is the thing that will actually happen rather
+/// than a separate code path that only looks similar.
+#[tauri::command]
+fn test_push() -> Result<String, String> {
+    let dir = config::claude_dir().ok_or("could not work out your home directory")?;
+    let settings = config::effective(&read_conf_text());
+    let topic = settings.get("NTFY_TOPIC").cloned().unwrap_or_default();
+    if topic.trim().is_empty() {
+        return Err("Set a topic first, then save.".to_string());
+    }
+
+    let output = if is_unix() {
+        spawn("bash")
+            .arg(dir.join("claude-notify.sh"))
+            .arg("blocked")
+            .env("CLAUDE_NOTIFY_DEBUG", "1")
+            .env("CLAUDE_NOTIFY_FORCE", "1")
+            .output()
+    } else {
+        spawn("powershell.exe")
+            .args(["-NoProfile", "-ExecutionPolicy", "Bypass", "-File"])
+            .arg(dir.join("claude-notify.ps1"))
+            .args(["-Kind", "blocked"])
+            .env("CLAUDE_NOTIFY_DEBUG", "1")
+            .env("CLAUDE_NOTIFY_FORCE", "1")
+            .output()
+    }
+    .map_err(|e| format!("could not run the notifier: {}", e))?;
+
+    let text = String::from_utf8_lossy(&output.stdout);
+    if text.contains("push=sent") || text.contains("push=ok") {
+        Ok("Sent. It should arrive on any phone subscribed to that topic.".to_string())
+    } else if text.contains("push=") {
+        Err(format!(
+            "The notifier tried and did not manage it: {}",
+            text.lines()
+                .find(|l| l.contains("push="))
+                .unwrap_or("no detail")
+                .trim()
+        ))
+    } else {
+        Ok("Sent, but the notifier said nothing about the push. Check your phone.".to_string())
+    }
+}
+
+/// A topic nobody will guess.
+///
+/// The topic name is the only thing protecting a push, so it is generated
+/// rather than typed. A name someone chooses themselves is usually their own
+/// name, which is the one thing an attacker would try first.
+#[tauri::command]
+fn suggest_topic() -> String {
+    // Enough randomness that guessing is hopeless, short enough to retype.
+    let mut seed = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos() as u64)
+        .unwrap_or(0)
+        ^ (std::process::id() as u64) << 32;
+    let alphabet: Vec<char> = "abcdefghijkmnpqrstuvwxyz23456789".chars().collect();
+    let mut out = String::from("earshot-");
+    for _ in 0..16 {
+        // xorshift, which is plenty for a name and needs no dependency.
+        seed ^= seed << 13;
+        seed ^= seed >> 7;
+        seed ^= seed << 17;
+        out.push(alphabet[(seed % alphabet.len() as u64) as usize]);
+    }
+    out
+}
+
+/// Connect or disconnect the browser extension.
+///
+/// This is the whole of what used to be a terminal command and a copied
+/// extension id. The app is already installed and is already a program the
+/// browser can launch, so it registers itself as the bridge.
 #[tauri::command]
 fn set_bridge(enable: bool) -> Result<String, String> {
     if enable {
@@ -749,7 +822,9 @@ fn main() {
             read_limits,
             open_url,
             set_bridge,
-            bridge_status
+            bridge_status,
+            test_push,
+            suggest_topic
         ])
         .run(tauri::generate_context!())
         .expect("error while running the app");

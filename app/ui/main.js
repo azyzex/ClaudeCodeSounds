@@ -24,11 +24,46 @@ const PATTERNS = [
 const SWITCHES = ['SUPPRESS_WHEN_FOCUSED', 'PROJECT_PITCH', 'SPEAK', 'TOAST_ON_DONE'];
 // Handled separately: it writes a startup entry as well as the config.
 const LOGIN_SWITCH = 'LAUNCH_AT_LOGIN';
-const TEXTS = ['QUIET_HOURS'];
+const TEXTS = ['QUIET_HOURS', 'NTFY_TOPIC'];
 const NUMBERS = ['MIN_SECONDS', 'ESCALATE_AFTER'];
 
 let state = null;
 let saveTimer = null;
+
+/** Run something with the control disabled, so a second click cannot start it.
+ *
+ * Every button that does real work goes through here. Double clicking a save or
+ * a push is not something to leave to how fast someone's mouse is.
+ */
+async function busy(el, work) {
+  if (!el || el.dataset.busy === '1') return;
+  el.dataset.busy = '1';
+  const wasDisabled = el.disabled;
+  el.disabled = true;
+  el.classList.add('busy');
+  try {
+    await work();
+  } catch (e) {
+    status(String(e), 'err');
+  } finally {
+    el.dataset.busy = '';
+    el.disabled = wasDisabled;
+    el.classList.remove('busy');
+  }
+}
+
+function note(id, text) {
+  const el = document.getElementById(id);
+  if (el) el.textContent = text;
+}
+
+/** Grey out everything the master switch controls. */
+function applyMaster(on) {
+  for (const card of document.querySelectorAll('main .card')) {
+    if (card.classList.contains('master-card')) continue;
+    card.classList.toggle('off', !on);
+  }
+}
 
 const $ = (id) => document.getElementById(id);
 
@@ -390,7 +425,53 @@ async function load() {
 
 async function main() {
   $('install').addEventListener('click', () => setHooks(true));
-  $('uninstall').addEventListener('click', () => setHooks(false));
+  const confirmRemove = document.getElementById('confirm-remove');
+  $('uninstall').addEventListener('click', () => confirmRemove?.showModal());
+  document.getElementById('confirm-remove-no')?.addEventListener('click', () =>
+    confirmRemove?.close()
+  );
+  document.getElementById('confirm-remove-yes')?.addEventListener('click', () => {
+    confirmRemove?.close();
+    setHooks(false);
+  });
+
+  // The master switch. Turning everything off without removing anything is what
+  // most people actually want when they reach for the red button, so it sits
+  // above it and says so.
+  const master = document.getElementById('master');
+  if (master) {
+    master.checked = state.installed > 0;
+    applyMaster(master.checked);
+    master.addEventListener('change', () => busy(master, async () => {
+      await setHooks(master.checked);
+      applyMaster(master.checked);
+    }));
+  }
+
+  document.getElementById('ntfy-suggest')?.addEventListener('click', (e) =>
+    busy(e.target, async () => {
+      const topic = await invoke('suggest_topic');
+      const field = document.getElementById('NTFY_TOPIC');
+      if (!field) return;
+      field.value = topic;
+      // Saved straight away: a generated topic sitting unsaved in a box is the
+      // easiest thing in the world to lose by closing the window.
+      await invoke('save_settings', { changes: { NTFY_TOPIC: topic } });
+      state.settings.NTFY_TOPIC = topic;
+      note('ntfy-result', 'Topic saved. Subscribe to it in the ntfy app on your phone.');
+    })
+  );
+
+  document.getElementById('ntfy-test')?.addEventListener('click', (e) =>
+    busy(e.target, async () => {
+      note('ntfy-result', 'Sending...');
+      try {
+        note('ntfy-result', await invoke('test_push'));
+      } catch (err) {
+        note('ntfy-result', String(err));
+      }
+    })
+  );
   try {
     await load();
   } catch (e) {
