@@ -15,3 +15,8 @@ h2 { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; opacity:
 /* Section heading. Quiet, because the numbers below it are the point. */
 .hd { font-size: 11px; text-transform: uppercase; letter-spacing: .06em;
       opacity: .5; margin: 10px 0 2px; }
+
+/* The header names are links now: to the project, and to whoever wrote it. */
+h1 a { color: inherit; text-decoration: none; }
+h1 a:hover { text-decoration: underline; }
+.dim { opacity: .55; }

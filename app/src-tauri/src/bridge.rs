@@ -375,3 +375,78 @@ pub fn run_host() {
         }
     }
 }
+
+/// Everything worth knowing about whether the link will actually work.
+///
+/// A switch that reports only "on" is no help when it is on and nothing
+/// happens. This says where the manifest went, whether the browser can find it,
+/// and whether the notifier it would call even exists.
+#[derive(serde::Serialize)]
+pub struct Status {
+    pub installed: bool,
+    pub extension_id: String,
+    /// Full paths of every manifest found, so a wrong one can be seen.
+    pub manifests: Vec<String>,
+    /// Windows only: whether the registry points at us.
+    pub registered: Option<bool>,
+    /// The program the manifest names, which should be this app.
+    pub program: String,
+    /// Whether the notifier the bridge would hand alerts to is installed.
+    pub notifier: bool,
+    /// Where the browser's usage readings land, once any arrive.
+    pub last_reading: Option<String>,
+}
+
+pub fn status() -> Status {
+    let manifests: Vec<String> = manifest_dirs()
+        .into_iter()
+        .map(|(_, dir)| dir.join(format!("{}.json", HOST_NAME)))
+        .filter(|p| p.is_file())
+        .map(|p| p.display().to_string())
+        .collect();
+
+    let program = std::env::current_exe()
+        .map(|p| p.display().to_string())
+        .unwrap_or_else(|_| "unknown".to_string());
+
+    let notifier = claude_dir()
+        .map(|d| {
+            d.join(if cfg!(target_os = "windows") {
+                "claude-notify.ps1"
+            } else {
+                "claude-notify.sh"
+            })
+            .is_file()
+        })
+        .unwrap_or(false);
+
+    let last_reading = claude_dir()
+        .map(|d| d.join("claude-limits.d").join("web.conf"))
+        .filter(|p| p.is_file())
+        .map(|p| p.display().to_string());
+
+    Status {
+        installed: !manifests.is_empty(),
+        extension_id: EXTENSION_ID.to_string(),
+        manifests,
+        registered: registry_present(),
+        program,
+        notifier,
+        last_reading,
+    }
+}
+
+#[cfg(windows)]
+fn registry_present() -> Option<bool> {
+    let key = format!(
+        r"HKCU\Software\Google\Chrome\NativeMessagingHosts\{}",
+        HOST_NAME
+    );
+    let out = crate::spawn("reg").args(["query", &key]).output();
+    Some(matches!(out, Ok(o) if o.status.success()))
+}
+
+#[cfg(not(windows))]
+fn registry_present() -> Option<bool> {
+    None
+}

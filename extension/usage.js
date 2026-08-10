@@ -115,6 +115,21 @@ async function pollUsage() {
 }
 
 chrome.alarms.create(USAGE_ALARM, { periodInMinutes: EVERY_MINUTES, delayInMinutes: 1 });
+
+// Read once as soon as the worker wakes, rather than waiting out the first
+// tick. Opening the popup a minute after installing and finding it empty made
+// the whole thing look broken when it was only early.
+pollUsage().catch(() => {});
+
+// And on demand, so opening the popup shows something current rather than
+// whatever the last tick happened to leave behind.
+chrome.runtime.onMessage.addListener((msg, _sender, reply) => {
+  if (!msg || msg.type !== 'earshot-poll-now') return undefined;
+  pollUsage()
+    .then(() => reply({ ok: true }))
+    .catch((e) => reply({ ok: false, error: String(e) }));
+  return true;   // the reply is async
+});
 chrome.alarms.onAlarm.addListener((a) => {
   if (a.name === USAGE_ALARM) pollUsage().catch(() => {});
 });

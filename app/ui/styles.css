@@ -268,3 +268,12 @@ dialog .small { font-size: .8rem; margin-top: 1.2rem; }
 }
 
 .about-links a { cursor: pointer; }
+
+/* The link's own report. Small and quiet, but every line of it is a fact
+   somebody will need when it does not work. */
+.detail {
+  font-size: .75rem;
+  line-height: 1.5;
+  margin: .6rem 0;
+  word-break: break-all;
+}

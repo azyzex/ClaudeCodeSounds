@@ -193,6 +193,15 @@ fn open_url(url: String) -> Result<(), String> {
 /// This is the whole of what used to be a terminal command and a copied
 /// extension id. The app is already installed and is already a program the
 /// browser can launch, so it registers itself as the bridge.
+/// What the browser link looks like from here, in detail.
+///
+/// Added because a switch that only says "on" is no use when it is on and
+/// nothing happens.
+#[tauri::command]
+fn bridge_status() -> bridge::Status {
+    bridge::status()
+}
+
 #[tauri::command]
 fn set_bridge(enable: bool) -> Result<String, String> {
     if enable {
@@ -739,7 +748,8 @@ fn main() {
             set_hooks,
             read_limits,
             open_url,
-            set_bridge
+            set_bridge,
+            bridge_status
         ])
         .run(tauri::generate_context!())
         .expect("error while running the app");

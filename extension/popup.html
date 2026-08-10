@@ -2,7 +2,12 @@
 <meta charset="utf-8">
 <title>Earshot</title>
 <link rel="stylesheet" href="popup.css">
-<h1>Earshot <span class="by">by Azyzex</span></h1>
+
+<h1>
+  <a href="https://github.com/azyzex/ClaudeCodeSounds" target="_blank" rel="noreferrer">Earshot</a>
+  <span class="by">by <a id="author" href="https://github.com/azyzex" target="_blank" rel="noreferrer">Azyzex</a></span>
+</h1>
+
 <label class="row"><span>Alerts on</span><input type="checkbox" id="enabled"></label>
 <label class="row"><span>Play a sound</span><input type="checkbox" id="sound"></label>
 <label class="row"><span>Show a notification</span><input type="checkbox" id="notify"></label>
@@ -10,11 +15,17 @@
   <span>Send to the desktop app</span>
   <input type="checkbox" id="bridge">
 </label>
-<p class="hint" id="bridgehint">Needs Earshot Bridge installed. Nothing leaves your machine.</p>
-<h2>Recent</h2>
+<p class="hint" id="bridgehint">
+  Turn this on in the desktop app too, under Browser. Nothing leaves your machine.
+</p>
+
 <div class="hd">Usage</div>
-<div id="limits"><div class="ev"><span>waiting for a reading</span></div></div>
+<div id="limits"><div class="ev"><span>checking...</span></div></div>
+<div class="hd">Account</div>
+<div id="account"><div class="ev"><span class="dim">not known yet</span></div></div>
+
 <div class="hd">Recent</div>
 <div id="recent"><p class="hint">Nothing yet.</p></div>
+
 <p class="foot">Independent project. Not affiliated with Anthropic.</p>
 <script src="popup.js"></script>

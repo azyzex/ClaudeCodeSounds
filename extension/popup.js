@@ -46,8 +46,46 @@ function showLimits(limits) {
   }
 }
 
-chrome.storage.local.get(null).then((s) => {
+/** Which account these figures belong to.
+ *
+ * Worth showing because the window is per account. Signed into a different one
+ * than you expected and the countdown is real but not yours, and without this
+ * there was no way to tell.
+ */
+function showAccount(limits) {
+  const host = document.getElementById('account');
+  if (!host) return;
+  host.textContent = '';
+  const row = document.createElement('div');
+  row.className = 'ev';
+  const what = document.createElement('span');
+  const when = document.createElement('span');
+  when.className = 'when';
+  if (limits?.account) {
+    what.textContent = limits.account;
+    when.textContent = limits.at ? 'read ' + ago(limits.at) : '';
+  } else {
+    what.className = 'dim';
+    what.textContent = 'open a claude.ai tab';
+  }
+  row.append(what, when);
+  host.append(row);
+}
+
+function render(s) {
   showLimits(s.limits);
+  showAccount(s.limits);
+}
+
+// Ask for a fresh reading the moment the popup opens, then draw whatever is
+// stored either way: a stale figure now beats a correct one after a wait.
+chrome.runtime.sendMessage({ type: 'earshot-poll-now' }, () => {
+  void chrome.runtime.lastError;
+  chrome.storage.local.get(null).then(render);
+});
+
+chrome.storage.local.get(null).then((s) => {
+  render(s);
   for (const k of KEYS) {
     const el = document.getElementById(k);
     el.checked = Boolean(s[k]);

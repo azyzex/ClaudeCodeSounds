@@ -376,6 +376,7 @@ async function load() {
   $('confpath').textContent = state.conf_path;
   const bridgeToggle = document.getElementById('bridge-toggle');
   if (bridgeToggle) bridgeToggle.checked = Boolean(state.bridge_installed);
+  showBridge();
   // The build number belongs in About, so a bug report can name it.
   const ver = document.getElementById('about-version');
   if (ver && state.version) ver.textContent = `Version ${state.version}`;
@@ -409,11 +410,14 @@ main();
 function untilText(epochSeconds) {
   const left = epochSeconds * 1000 - Date.now();
   if (left <= 0) return 'any moment';
-  const mins = Math.floor(left / 60000);
-  if (mins < 60) return `in ${mins}m`;
+  const secs = Math.floor(left / 1000);
+  const mins = Math.floor(secs / 60);
   const hours = Math.floor(mins / 60);
-  if (hours < 24) return `in ${hours}h ${mins % 60}m`;
-  return `in ${Math.round(hours / 24)} days`;
+  // Seconds are shown because a countdown that only moves once a minute looks
+  // frozen, and this is the number people sit and watch.
+  if (mins < 60) return `in ${mins}m ${secs % 60}s`;
+  if (hours < 24) return `in ${hours}h ${mins % 60}m ${secs % 60}s`;
+  return `in ${Math.floor(hours / 24)}d ${hours % 24}h`;
 }
 
 function agoText(epochSeconds) {
@@ -447,6 +451,9 @@ function windowRow(name, w) {
 
   const when = document.createElement('span');
   when.className = 'when';
+  // The reset time is kept on the element so the one-second tick can redraw it
+  // without going back to disk.
+  when.dataset.resets = String(w.resets_at);
   when.textContent = untilText(w.resets_at);
 
   row.append(label, bar, value, when);
@@ -576,14 +583,68 @@ document
   .getElementById('refresh-limits')
   ?.addEventListener('click', () => showLimits({ manual: true }));
 showLimits();
-// The countdown should not go stale while the window sits open.
+// Two timers on purpose. The figures are re-read from disk once a minute,
+// because that is how often they can change. The countdown is redrawn every
+// second, because a display with seconds in it that only moves once a minute
+// is worse than one without them.
 setInterval(showLimits, 60000);
+setInterval(() => {
+  for (const el of document.querySelectorAll('#limits .when[data-resets]')) {
+    el.textContent = untilText(Number(el.dataset.resets));
+  }
+}, 1000);
 
 // --------------------------------------------------------------- browser ---
 
 // This used to be a terminal command plus an extension id copied out of
 // chrome://extensions. The app registers itself as the browser's link instead,
 // so there is nothing to copy and no Python to install.
+/** Say plainly what the link is, and is not, doing.
+ *
+ * The switch alone was not enough: turning it on and seeing nothing change is
+ * indistinguishable from turning it on and it failing.
+ */
+async function showBridge() {
+  const host = document.getElementById('bridge-detail');
+  if (!host) return;
+  let s;
+  try {
+    s = await invoke('bridge_status');
+  } catch (e) {
+    host.textContent = `Could not check the link: ${String(e)}`;
+    return;
+  }
+
+  const lines = [];
+  if (s.installed) {
+    lines.push('Your browsers can see this app.');
+  } else {
+    lines.push('Not connected yet. Turn the switch on above.');
+  }
+  if (s.registered === false && s.installed) {
+    lines.push('Chrome could not be registered, so it may not find the app.');
+  }
+  if (!s.notifier) {
+    lines.push('The notifier is not installed, so alerts would have nothing to play. Install the alerts first.');
+  }
+  lines.push(
+    s.last_reading
+      ? 'A usage reading from the browser has arrived.'
+      : 'No usage reading from the browser yet. Open a claude.ai tab with the extension on.'
+  );
+  lines.push(`Extension id: ${s.extension_id}`);
+  for (const m of s.manifests) lines.push(m);
+
+  host.textContent = '';
+  for (const line of lines) {
+    const p = document.createElement('div');
+    p.textContent = line;
+    host.append(p);
+  }
+}
+
+document.getElementById('bridge-check')?.addEventListener('click', showBridge);
+
 document.getElementById('bridge-toggle')?.addEventListener('change', async (e) => {
   const on = e.target.checked;
   e.target.disabled = true;
@@ -596,6 +657,7 @@ document.getElementById('bridge-toggle')?.addEventListener('change', async (e) =
     e.target.checked = !on;
   } finally {
     e.target.disabled = false;
+    await showBridge();
   }
 });
 
