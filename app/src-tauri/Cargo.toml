@@ -1,6 +1,6 @@
 [package]
 name = "claude-code-sounds"
-version = "0.5.2"
+version = "0.6.0"
 description = "Configure Claude Code sound alerts"
 authors = ["Mohamed Aziz Guenni"]
 license = "MIT"

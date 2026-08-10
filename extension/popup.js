@@ -145,6 +145,28 @@ volume?.addEventListener('change', async () => {
 document.getElementById('connect')?.addEventListener('click', () => {
   const state = document.getElementById('bridgestate');
   const button = document.getElementById('connect');
+
+  // Called first and without awaiting anything, because a permission request
+  // has to happen inside the click itself. Any await before it ends the gesture
+  // and Chrome refuses.
+  chrome.permissions.request({ permissions: ['nativeMessaging'] }, (granted) => {
+    if (chrome.runtime.lastError) {
+      if (state) state.textContent = `Chrome refused: ${chrome.runtime.lastError.message}`;
+      return;
+    }
+    if (!granted) {
+      if (state) {
+        state.textContent =
+          'Permission was not given, so the extension cannot reach the app. ' +
+          'Press the button again and choose Allow.';
+      }
+      return;
+    }
+    connectNow(state, button);
+  });
+});
+
+function connectNow(state, button) {
   if (state) state.textContent = 'Looking for the app...';
   if (button) button.disabled = true;
   chrome.runtime.sendMessage({ type: 'earshot-connect' }, (r) => {
@@ -155,10 +177,21 @@ document.getElementById('connect')?.addEventListener('click', () => {
     }
     showBridge(r);
   });
-});
+}
 
 document.getElementById('bridgetest')?.addEventListener('click', (e) => {
   const state = document.getElementById('bridgestate');
+  chrome.permissions.request({ permissions: ['nativeMessaging'] }, (granted) => {
+    if (!granted) {
+      if (state) state.textContent = 'Connect first, and choose Allow.';
+      return;
+    }
+    sendBridgeTest(e.target, state);
+  });
+});
+
+function sendBridgeTest(button, state) {
+  const e = { target: button };
   e.target.disabled = true;
   if (state) state.textContent = 'Sending...';
   chrome.runtime.sendMessage({ type: 'earshot-bridge-test' }, (r) => {
@@ -176,7 +209,7 @@ document.getElementById('bridgetest')?.addEventListener('click', (e) => {
     }
     showBridge(r);
   });
-});
+}
 
 document.getElementById('test')?.addEventListener('click', () => {
   const out = document.getElementById('testresult');

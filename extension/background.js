@@ -243,16 +243,13 @@ async function runTest() {
  * speaks to it and reports what came back.
  */
 async function pingBridge() {
-  // nativeMessaging is optional on purpose: it is the only permission that
-  // lets anything reach outside the browser, so it is not held until asked
-  // for. Until it is granted the API does not exist at all, which is what
-  // "sendNativeMessage is not a function" was telling us.
+  // The permission is only checked here, never requested. Requesting it must
+  // happen inside a real click, and a service worker has no click: asking from
+  // here is what produced "must be called during a user gesture". The popup
+  // asks, because that is where the click is.
   let granted = false;
   try {
     granted = await chrome.permissions.contains({ permissions: ['nativeMessaging'] });
-    if (!granted) {
-      granted = await chrome.permissions.request({ permissions: ['nativeMessaging'] });
-    }
   } catch (e) {
     return { ok: false, reason: 'failed', detail: String(e) };
   }
@@ -260,7 +257,7 @@ async function pingBridge() {
     return {
       ok: false,
       reason: 'denied',
-      detail: 'Permission to talk to the desktop app was not given.',
+      detail: 'Permission to talk to the desktop app has not been given yet.',
     };
   }
 

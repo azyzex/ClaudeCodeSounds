@@ -417,13 +417,19 @@ async function renderLog() {
 async function load() {
   state = await invoke('load_state');
   $('confpath').textContent = state.conf_path;
-  const bridgeToggle = document.getElementById('bridge-toggle');
-  if (bridgeToggle) bridgeToggle.checked = Boolean(state.bridge_installed);
   showBridge();
   // The build number belongs in About, so a bug report can name it.
   const ver = document.getElementById('about-version');
   if (ver && state.version) ver.textContent = `Version ${state.version}`;
   renderInstallState();
+  // Set here rather than while wiring: wiring runs before the first load, so
+  // reading state there threw and silently killed every listener registered
+  // after it. That is what left the phone buttons dead.
+  const masterBox = document.getElementById('master');
+  if (masterBox) {
+    masterBox.checked = (state?.installed ?? 0) > 0;
+    applyMaster(masterBox.checked);
+  }
   renderEvents();
   bindGeneral();
   fillGeneral();
@@ -448,10 +454,6 @@ async function main() {
   // above it and says so.
   const master = document.getElementById('master');
   if (master) {
-    // On unless the hooks are genuinely absent. Alerts existing is the point of
-    // the app, so that is the state it opens in.
-    master.checked = state.installed > 0;
-    applyMaster(master.checked);
     const confirmOff = document.getElementById('confirm-off');
     master.addEventListener('change', () => {
       if (!master.checked) {
@@ -777,21 +779,73 @@ async function showBridge() {
 
 document.getElementById('bridge-check')?.addEventListener('click', showBridge);
 
-document.getElementById('bridge-toggle')?.addEventListener('change', async (e) => {
-  const on = e.target.checked;
-  e.target.disabled = true;
-  try {
-    status(await invoke('set_bridge', { enable: on }), 'ok');
-  } catch (err) {
-    status(String(err), 'err');
-    // Put the switch back where it was: leaving it showing a state that was
-    // never reached is how someone ends up believing this is set up.
-    e.target.checked = !on;
-  } finally {
-    e.target.disabled = false;
-    await showBridge();
-  }
-});
+/** The whole connection, as one procedure with something to watch.
+ *
+ * A tick that wrote a preference told nobody anything, and could not: the
+ * browser has to speak first. This registers the app, then waits for the
+ * extension to actually say something, and shows which of those two halves it
+ * is on rather than declaring success at the halfway point.
+ */
+let waitTimer = null;
+
+document.getElementById('bridge-connect')?.addEventListener('click', (e) =>
+  busy(e.target, async () => {
+    const dialog = document.getElementById('bridge-wait');
+    const step = document.getElementById('bridge-wait-step');
+    const waitNote = document.getElementById('bridge-wait-note');
+    const done = document.getElementById('bridge-wait-done');
+    if (done) done.hidden = true;
+    if (waitNote) waitNote.textContent = '';
+    dialog?.showModal();
+
+    const idField = document.getElementById('extension-id');
+    try {
+      await invoke('set_bridge', { enable: true, extensionId: idField?.value || null });
+    } catch (err) {
+      if (step) step.textContent = `Could not register: ${String(err)}`;
+      if (done) done.hidden = false;
+      return;
+    }
+    if (step) step.textContent = 'Registered. Now waiting for the extension to say hello.';
+
+    // Watches the app's own record of when the browser last spoke, so the wait
+    // ends on something that actually happened rather than on a timer.
+    const startedAt = Date.now();
+    const before = (await invoke('bridge_status').catch(() => null))?.last_contact || null;
+    clearInterval(waitTimer);
+    waitTimer = setInterval(async () => {
+      const st = await invoke('bridge_status').catch(() => null);
+      if (!st) return;
+      if (st.last_contact && st.last_contact !== before) {
+        clearInterval(waitTimer);
+        if (step) step.textContent = 'The extension reached this app. The link works.';
+        if (waitNote) waitNote.textContent = '';
+        if (done) done.hidden = false;
+        showBridge();
+        return;
+      }
+      const waited = Math.round((Date.now() - startedAt) / 1000);
+      if (waitNote) waitNote.textContent = `Listening... ${waited}s`;
+      if (waited > 180) {
+        clearInterval(waitTimer);
+        if (step) {
+          step.textContent =
+            'Nothing heard in three minutes. Check the extension is reloaded, and ' +
+            'that the id it shows matches the one in this window.';
+        }
+        if (done) done.hidden = false;
+      }
+    }, 1000);
+  })
+);
+
+for (const id of ['bridge-wait-cancel', 'bridge-wait-done']) {
+  document.getElementById(id)?.addEventListener('click', () => {
+    clearInterval(waitTimer);
+    document.getElementById('bridge-wait')?.close();
+    showBridge();
+  });
+}
 
 // ---------------------------------------------------------------- about ---
 

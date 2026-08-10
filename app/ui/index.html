@@ -66,7 +66,10 @@
 
       <label class="row">
         <span class="label">Topic</span>
-        <input type="text" id="NTFY_TOPIC" spellcheck="false" autocomplete="off" />
+        <span class="field-row">
+          <input type="text" id="NTFY_TOPIC" spellcheck="false" autocomplete="off" />
+          <button id="ntfy-subscribe" class="ghost">Subscribe</button>
+        </span>
       </label>
 
       <p class="hint warn">
@@ -78,7 +81,6 @@
 
       <div class="about-links">
         <button id="ntfy-suggest" class="ghost">Generate a safe topic</button>
-        <button id="ntfy-subscribe" class="ghost">Subscribe on this device</button>
         <button id="ntfy-test" class="ghost">Send a test push</button>
       </div>
       <p class="hint" id="ntfy-result"></p>
@@ -93,10 +95,26 @@
         never open Claude Code.
       </p>
 
-      <label class="row switch-row">
-        <span class="label">Let the browser extension talk to this app</span>
-        <input type="checkbox" id="bridge-toggle" />
-      </label>
+      <div class="row">
+        <span class="label">Link with the browser extension</span>
+        <button id="bridge-connect">Connect</button>
+      </div>
+
+      <dialog id="bridge-wait">
+        <h2>Waiting for the extension</h2>
+        <p id="bridge-wait-step">Registering this app with your browsers...</p>
+        <p class="muted">
+          In Chrome, open the Earshot popup and press
+          <strong>Connect to the desktop app</strong>, then
+          <strong>Send a test to the desktop app</strong>. This window notices as
+          soon as it hears from the extension.
+        </p>
+        <p class="hint" id="bridge-wait-note"></p>
+        <div class="about-links">
+          <button id="bridge-wait-cancel">Cancel</button>
+          <button id="bridge-wait-done" class="ghost" hidden>Done</button>
+        </div>
+      </dialog>
 
       <p class="hint" id="bridge-note">
         Turn this on, then install the extension in Chrome and switch on
