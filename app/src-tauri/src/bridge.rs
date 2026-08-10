@@ -408,6 +408,42 @@ fn handle(message: &serde_json::Value) -> serde_json::Value {
     serde_json::json!({"ok": true})
 }
 
+/// Where the app leaves a message for the browser.
+///
+/// The app and the bridge are different processes: Chrome starts the bridge,
+/// not us, so the window cannot write to its pipe directly. It leaves a line in
+/// this file instead and the bridge, which is holding the pipe, passes it on.
+/// That is what makes a test from the app to the browser possible at all.
+pub fn outbox_path() -> Option<PathBuf> {
+    claude_dir().map(|d| d.join("earshot-outbox"))
+}
+
+/// Watch for anything the app wants said to the browser, and say it.
+///
+/// Only runs while the browser has a port open, so nothing here keeps a process
+/// alive on its own.
+fn start_outbox_watcher() {
+    std::thread::spawn(|| {
+        loop {
+            std::thread::sleep(std::time::Duration::from_millis(400));
+            let Some(path) = outbox_path() else { return };
+            let Ok(text) = std::fs::read_to_string(&path) else {
+                continue;
+            };
+            let _ = std::fs::remove_file(&path);
+            let kind = text.trim();
+            // One word, checked against a list. The file is ours, but a file is
+            // still the sort of thing that gets edited.
+            if !["test", "done", "blocked", "limit"].contains(&kind) {
+                continue;
+            }
+            if write_message(&serde_json::json!({ "from": "app", "kind": kind })).is_err() {
+                return;
+            }
+        }
+    });
+}
+
 /// Talk to the browser until it closes the pipe.
 pub fn run_host() {
     // The manifest already restricts who may start this, and the browser
@@ -418,6 +454,8 @@ pub fn run_host() {
             return;
         }
     }
+
+    start_outbox_watcher();
 
     let mut last = std::time::Instant::now() - std::time::Duration::from_secs(60);
     while let Some(message) = read_message() {

@@ -779,6 +779,34 @@ async function showBridge() {
 
 document.getElementById('bridge-check')?.addEventListener('click', showBridge);
 
+document.getElementById('bridge-test')?.addEventListener('click', (e) =>
+  busy(e.target, async () => {
+    note('bridge-test-result', 'Asking the browser...');
+    try {
+      note('bridge-test-result', await invoke('test_browser'));
+    } catch (err) {
+      note('bridge-test-result', String(err));
+    }
+  })
+);
+
+// Notice when the extension reaches this app, so a test started in the browser
+// is answered here rather than only in the browser.
+let lastSeenContact = null;
+setInterval(async () => {
+  const s = await invoke('bridge_status').catch(() => null);
+  if (!s) return;
+  if (lastSeenContact === null) {
+    lastSeenContact = s.last_contact || '';
+    return;
+  }
+  if (s.last_contact && s.last_contact !== lastSeenContact) {
+    lastSeenContact = s.last_contact;
+    status('The browser extension just reached this app.', 'ok');
+    showBridge();
+  }
+}, 3000);
+
 /** The whole connection, as one procedure with something to watch.
  *
  * A tick that wrote a preference told nobody anything, and could not: the

@@ -505,6 +505,19 @@ switch ($Kind) {
 if (-not $detail) { $detail = $fallback }
 if ($detail.Length -gt 180) { $detail = $detail.Substring(0,177) + '...' }
 
+# Where it came from. With alerts arriving from several terminals and a browser
+# at once, "Claude is done" answers the wrong question. The title says which,
+# using the project folder for a terminal because that is how sessions are
+# thought of.
+$sourceLabel = ''
+switch ($env:CLAUDE_NOTIFY_SOURCE) {
+    'web'   { $sourceLabel = 'browser' }
+    ''      { if ($cwd) { $sourceLabel = Split-Path $cwd -Leaf } }
+    $null   { if ($cwd) { $sourceLabel = Split-Path $cwd -Leaf } }
+    default { $sourceLabel = $env:CLAUDE_NOTIFY_SOURCE }
+}
+if ($sourceLabel) { $title = "$title - $sourceLabel" }
+
 # Turn the project directory into a stable index, so the same project always
 # gets the same chime.
 if ($opt['PROJECT_PITCH'] -eq '1' -and $Kind -eq 'done' -and $cwd) {

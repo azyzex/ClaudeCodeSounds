@@ -171,6 +171,10 @@ chrome.runtime.onMessage.addListener((msg, sender) => {
   });
 });
 
+chrome.permissions.contains({ permissions: ['nativeMessaging'] }, (has) => {
+  if (has) openPort();
+});
+
 chrome.runtime.onInstalled.addListener(async () => {
   await chrome.storage.local.get(DEFAULTS).then((s) => chrome.storage.local.set(s));
   await injectIntoOpenTabs();
@@ -233,6 +237,44 @@ async function runTest() {
     else soundError = r;
   }
   return { ok: true, notified: s.notify, played, soundError, wantedSound: s.sound };
+}
+
+/** Hold a line open to the app, so it can speak to us and not only be spoken to.
+ *
+ * sendNativeMessage starts a process, sends one thing and closes it, which only
+ * ever works one way round. A port stays open, so the app can push as well.
+ * That is what makes a test from the app to the browser possible.
+ *
+ * It is opened lazily and reopened if it drops, but never kept alive on its own
+ * account: when the browser sleeps the worker, the port goes with it, and the
+ * program on the other end exits.
+ */
+let port = null;
+
+function openPort() {
+  if (port) return port;
+  try {
+    port = chrome.runtime.connectNative(BRIDGE);
+  } catch {
+    port = null;
+    return null;
+  }
+  port.onMessage.addListener((msg) => {
+    if (msg?.from !== 'app') return;
+    // The app asking us to prove the link. Says so on screen and makes the
+    // noise, since one without the other proves only half of it.
+    chrome.notifications.create('earshot-apptest', {
+      type: 'basic',
+      iconUrl: 'icons/128x128.png',
+      title: 'Test from the desktop app',
+      message: 'Your desktop app reached this browser. The link works both ways.',
+    });
+    play('done');
+  });
+  port.onDisconnect.addListener(() => {
+    port = null;
+  });
+  return port;
 }
 
 /** Ask the desktop app whether it is there.
@@ -314,6 +356,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, reply) => {
     pingBridge().then(async (r) => {
       // Only remembered as on once it has actually answered.
       await chrome.storage.local.set({ bridge: Boolean(r.ok) });
+      if (r.ok) openPort();
       reply(r);
     });
     return true;

@@ -1081,6 +1081,24 @@ case "$KIND" in
 esac
 [ -n "$DETAIL" ] || DETAIL="$FALLBACK"
 
+# --- where it came from -------------------------------------------------------
+# With alerts arriving from several terminals and a browser at once, "Claude is
+# done" answers the wrong question. The title says which one, using the project
+# folder for a terminal because that is how people think of their sessions.
+SOURCE_LABEL=""
+case "${CLAUDE_NOTIFY_SOURCE:-}" in
+  web) SOURCE_LABEL="browser" ;;
+  '')
+    if [ -n "$CWD" ]; then
+      SOURCE_LABEL=${CWD##*/}
+    fi
+    ;;
+  *) SOURCE_LABEL="${CLAUDE_NOTIFY_SOURCE}" ;;
+esac
+if [ -n "$SOURCE_LABEL" ]; then
+  TITLE="$TITLE - $SOURCE_LABEL"
+fi
+
 # --- play --------------------------------------------------------------------
 PLAYER_USED=""   # set by play_file on success; empty means we fell back
 PITCH_IDX=0

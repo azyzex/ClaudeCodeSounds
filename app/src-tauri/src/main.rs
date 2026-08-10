@@ -317,6 +317,17 @@ fn suggest_topic() -> String {
 /// This is the whole of what used to be a terminal command and a copied
 /// extension id. The app is already installed and is already a program the
 /// browser can launch, so it registers itself as the bridge.
+/// Ask the browser to make a noise, to prove the link the other way round.
+#[tauri::command]
+fn test_browser() -> Result<String, String> {
+    let path = bridge::outbox_path().ok_or("could not work out your home directory")?;
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    std::fs::write(&path, "test").map_err(|e| e.to_string())?;
+    Ok("Asked the browser to play a tone. It needs a claude.ai tab open and the extension connected.".to_string())
+}
+
 #[tauri::command]
 fn set_bridge(enable: bool, extension_id: Option<String>) -> Result<String, String> {
     if let Some(id) = extension_id.filter(|s| !s.trim().is_empty()) {
@@ -870,7 +881,8 @@ fn main() {
             bridge_status,
             test_push,
             suggest_topic,
-            open_ntfy
+            open_ntfy,
+            test_browser
         ])
         .run(tauri::generate_context!())
         .expect("error while running the app");
