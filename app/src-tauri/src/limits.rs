@@ -114,9 +114,158 @@ pub fn read_all(dir: &Path) -> Vec<Source> {
         .collect()
 }
 
+/// Seconds since the epoch, or 0 if the clock is before 1970.
+fn now() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0)
+}
+
+/// "2h 10m", "45m", "any moment".
+///
+/// Floors rather than rounds. A countdown that says two hours when there is one
+/// hour fifty-nine left is the kind of small lie that gets noticed.
+pub fn human_gap(seconds: i64) -> String {
+    if seconds <= 0 {
+        return "any moment".to_string();
+    }
+    let mins = seconds / 60;
+    if mins < 60 {
+        return format!("{}m", mins.max(1));
+    }
+    let hours = mins / 60;
+    if hours < 24 {
+        return format!("{}h {}m", hours, mins % 60);
+    }
+    format!("{} days", hours / 24)
+}
+
+/// What the tray icon says when you hover it.
+///
+/// The soonest reset across every source and both windows, because the only
+/// question a tray tooltip can usefully answer is "how long until I can work
+/// again". Which account it belongs to is left to the window: there is no room
+/// here, and with one account it would be noise.
+pub fn tooltip(dir: &Path) -> String {
+    const NAME: &str = "Claude Code Sounds";
+    let at = now();
+    let soonest = read_all(dir)
+        .into_iter()
+        .flat_map(|s| {
+            [
+                ("5 hour", s.five_hour.resets_at),
+                ("7 day", s.seven_day.resets_at),
+            ]
+        })
+        .filter_map(|(label, resets)| resets.map(|r| (label, r)))
+        // Times already past belong to a window that has rolled over, and the
+        // next reading will replace them. Counting down to them would be wrong.
+        .filter(|(_, r)| *r > at)
+        .min_by_key(|(_, r)| *r);
+
+    match soonest {
+        Some((label, r)) => format!("{}\n{} resets in {}", NAME, label, human_gap(r - at)),
+        None => NAME.to_string(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A directory of its own for each test that needs one.
+    ///
+    /// Tests in one binary share a process id, so naming a scratch directory
+    /// after it alone would hand the same path to every caller and let one
+    /// test's files decide another's result.
+    fn tempdir() -> PathBuf {
+        use std::sync::atomic::{AtomicU32, Ordering};
+        static N: AtomicU32 = AtomicU32::new(0);
+        let dir = std::env::temp_dir().join(format!(
+            "earshot-tip-{}-{}",
+            std::process::id(),
+            N.fetch_add(1, Ordering::Relaxed)
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn a_gap_is_floored_not_rounded() {
+        // 1h59m40s must never read as two hours. A countdown that rounds up is
+        // the kind of small lie that gets noticed.
+        assert_eq!(human_gap(7180), "1h 59m");
+        assert_eq!(human_gap(7200), "2h 0m");
+        assert_eq!(human_gap(59), "1m");
+        assert_eq!(human_gap(3599), "59m");
+        assert_eq!(human_gap(0), "any moment");
+        assert_eq!(human_gap(-5), "any moment");
+        assert_eq!(human_gap(90000), "1 days");
+    }
+
+    #[test]
+    fn the_tooltip_counts_down_to_the_soonest_reset() {
+        let dir = tempdir();
+        let now = now();
+        // Two sources, two accounts. The nearer one wins regardless of which
+        // file it came from, because the only useful question is "how long".
+        std::fs::write(
+            dir.join("claude-limits.json"),
+            format!("updated={}\nfive_hour_resets_at={}\n", now, now + 7200),
+        )
+        .unwrap();
+        std::fs::create_dir_all(dir.join("claude-limits.d")).unwrap();
+        std::fs::write(
+            dir.join("claude-limits.d").join("web.conf"),
+            format!(
+                "updated={}\nsource=web\naccount=a1b2c3\nfive_hour_resets_at={}\n",
+                now,
+                now + 600
+            ),
+        )
+        .unwrap();
+
+        let text = tooltip(&dir);
+        assert!(
+            text.starts_with(
+                "Claude Code Sounds
+"
+            ),
+            "{}",
+            text
+        );
+        assert!(
+            text.contains("10m"),
+            "should pick the nearer reset: {}",
+            text
+        );
+        assert!(
+            !text.contains("2h"),
+            "should not show the later one: {}",
+            text
+        );
+    }
+
+    #[test]
+    fn a_reset_already_past_is_not_counted_down_to() {
+        let dir = tempdir();
+        let now = now();
+        // The window has rolled over and the next reading will replace this.
+        // Counting down to a moment that has gone would show nonsense.
+        std::fs::write(
+            dir.join("claude-limits.json"),
+            format!("updated={}\nfive_hour_resets_at={}\n", now, now - 60),
+        )
+        .unwrap();
+        assert_eq!(tooltip(&dir), "Claude Code Sounds");
+    }
+
+    #[test]
+    fn the_tooltip_is_just_the_name_when_nothing_is_known() {
+        assert_eq!(tooltip(&tempdir()), "Claude Code Sounds");
+    }
 
     const CC: &str = "updated=1786300000\nfive_hour_used=43.5\nfive_hour_resets_at=1786322194\n";
     const WEB: &str = "updated=1786300000\nsource=web\naccount=a1b2c3\n\

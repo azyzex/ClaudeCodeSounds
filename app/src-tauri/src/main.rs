@@ -377,6 +377,35 @@ fn muted_until() -> Option<u64> {
 
 /// A tray icon, so the two things people reach for in a hurry, quieting the
 /// alerts and opening the settings, do not need the window to be open.
+/// Keep the tray tooltip counting down.
+///
+/// The tray is the only part of the app that is always there, so it should be
+/// able to answer the one question worth asking without opening a window.
+///
+/// A thread rather than an async task, and a minute rather than a second: the
+/// figure it reads only changes when a window rolls over, and a tray tooltip
+/// that recomputes constantly is a laptop fan for no reason.
+fn start_tooltip_watcher(app: tauri::AppHandle) {
+    std::thread::spawn(move || {
+        let mut last = String::new();
+        loop {
+            let text = match config::claude_dir() {
+                Some(dir) => limits::tooltip(&dir),
+                None => "Claude Code Sounds".to_string(),
+            };
+            // Only touched when it actually changes. Setting the same tooltip
+            // every minute is a needless trip into the platform tray API.
+            if text != last {
+                if let Some(tray) = app.tray_by_id("main") {
+                    let _ = tray.set_tooltip(Some(&text));
+                    last = text;
+                }
+            }
+            std::thread::sleep(std::time::Duration::from_secs(60));
+        }
+    });
+}
+
 fn build_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
     use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
     use tauri::tray::TrayIconBuilder;
@@ -608,6 +637,7 @@ fn main() {
         .setup(|app| {
             build_tray(app.handle())?;
             start_escalation_watcher(app.handle().clone());
+            start_tooltip_watcher(app.handle().clone());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
