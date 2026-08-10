@@ -18,15 +18,17 @@
 <div id="settings">
   <label class="row"><span>Play a sound</span><input type="checkbox" id="sound"></label>
   <label class="row"><span>Show a notification</span><input type="checkbox" id="notify"></label>
-  <label class="row">
-    <span>Send to the desktop app</span>
-    <input type="checkbox" id="bridge">
-  </label>
-  <p class="hint" id="bridgehint">
-    Turn this on in the desktop app too, under Browser. Nothing leaves your machine.
-  </p>
   <button id="test">Test an alert</button>
   <p class="hint" id="testresult"></p>
+
+  <div class="hd">Desktop app</div>
+  <p class="hint" id="bridgestate">Not connected.</p>
+  <button id="connect">Connect to the desktop app</button>
+  <p class="hint" id="bridgehint">
+    Optional. It sends alerts through the app so the browser sounds the same as
+    your terminal, and can reach your phone. Nothing leaves your machine
+    otherwise.
+  </p>
 </div>
 
 <div class="hd">Usage</div>

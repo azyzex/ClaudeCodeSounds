@@ -1,4 +1,4 @@
-const KEYS = ['enabled', 'sound', 'notify', 'bridge'];
+const KEYS = ['enabled', 'sound', 'notify'];
 const LABEL = { done: 'Finished', blocked: 'Needed you', limit: 'Hit a limit' };
 
 function ago(at) {
@@ -93,6 +93,45 @@ function applyEnabled(on) {
   }
 }
 
+/** Say where the link stands, in words rather than a tick. */
+function showBridge(r) {
+  const state = document.getElementById('bridgestate');
+  const button = document.getElementById('connect');
+  if (!state) return;
+  if (r?.ok) {
+    state.textContent = r.notifier === false
+      ? `Connected to the app (version ${r.app}), but the alert sounds are not installed yet. Open the app and install the alerts.`
+      : `Connected to the app, version ${r.app}.`;
+    if (button) button.textContent = 'Check again';
+    return;
+  }
+  if (r?.reason === 'notfound') {
+    state.textContent =
+      'The desktop app is not set up for this yet. Open Claude Code Sounds, ' +
+      'go to Browser, turn the switch on, then press this again.';
+  } else if (r?.reason) {
+    state.textContent = `Could not reach the app: ${r.detail}`;
+  } else {
+    state.textContent = 'Not connected.';
+  }
+  if (button) button.textContent = 'Connect to the desktop app';
+}
+
+document.getElementById('connect')?.addEventListener('click', () => {
+  const state = document.getElementById('bridgestate');
+  const button = document.getElementById('connect');
+  if (state) state.textContent = 'Looking for the app...';
+  if (button) button.disabled = true;
+  chrome.runtime.sendMessage({ type: 'earshot-connect' }, (r) => {
+    if (button) button.disabled = false;
+    if (chrome.runtime.lastError) {
+      if (state) state.textContent = 'The extension is not running. Reload it and try again.';
+      return;
+    }
+    showBridge(r);
+  });
+});
+
 document.getElementById('test')?.addEventListener('click', () => {
   const out = document.getElementById('testresult');
   if (out) out.textContent = 'Playing...';
@@ -108,6 +147,12 @@ document.getElementById('test')?.addEventListener('click', () => {
     }
     // Saying which half ran matters: silence with sound turned off is correct,
     // and silence with it turned on is a fault.
+    // The sound failing while the notification worked is the exact case that
+    // went unnoticed for a whole release, so it gets said out loud.
+    if (r.wantedSound && !r.played) {
+      out.textContent = `The notification was sent but the sound failed: ${r.soundError}`;
+      return;
+    }
     const did = [r.played && 'sound', r.notified && 'notification'].filter(Boolean);
     out.textContent = did.length
       ? `Sent a ${did.join(' and a ')}. Seen nothing? Check Windows notification settings.`
@@ -118,6 +163,9 @@ document.getElementById('test')?.addEventListener('click', () => {
 chrome.storage.local.get(null).then((s) => {
   render(s);
   applyEnabled(s.enabled !== false);
+  // Shows the last known state without speaking to the app, so opening the
+  // popup stays instant. The button is what actually checks.
+  if (s.bridge) showBridge({ ok: true, app: s.bridgeVersion || '?' });
   for (const k of KEYS) {
     const el = document.getElementById(k);
     el.checked = Boolean(s[k]);

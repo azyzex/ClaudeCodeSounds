@@ -332,6 +332,21 @@ fn store_limits(message: &serde_json::Value) -> Result<(), &'static str> {
 
 fn handle(message: &serde_json::Value) -> serde_json::Value {
     let kind = message.get("kind").and_then(|v| v.as_str()).unwrap_or("");
+    // A ping so the extension can prove the link works instead of assuming it.
+    // It does nothing and says so, which is the point.
+    if kind == "ping" {
+        return serde_json::json!({
+            "ok": true,
+            "app": env!("CARGO_PKG_VERSION"),
+            "notifier": claude_dir()
+                .map(|d| d.join(if cfg!(target_os = "windows") {
+                    "claude-notify.ps1"
+                } else {
+                    "claude-notify.sh"
+                }).is_file())
+                .unwrap_or(false),
+        });
+    }
     if kind == "limits" {
         return match store_limits(message) {
             Ok(()) => serde_json::json!({"ok": true, "stored": true}),

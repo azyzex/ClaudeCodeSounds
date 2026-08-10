@@ -31,3 +31,5 @@ input.big { transform: scale(1.35); transform-origin: right center; }
 
 #test { width: 100%; margin-top: .5rem; padding: .4rem; cursor: pointer; }
 #testresult:empty { display: none; }
+
+#connect { width: 100%; margin-top: .3rem; padding: .4rem; cursor: pointer; }

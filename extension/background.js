@@ -38,19 +38,46 @@ async function settings() {
  * the extension tiny, and means there is no bundled binary for anyone to have
  * to trust. Each kind gets its own rhythm, which carries better than pitch.
  */
-async function play(kind) {
-  const pattern = kind === 'done' ? [0] : kind === 'blocked' ? [0, 220] : [0, 160, 320];
-  const freq = kind === 'done' ? 1046 : kind === 'blocked' ? 880 : 440;
+/** Make sure the document that can make a sound exists.
+ *
+ * A service worker cannot play audio, so Chrome wants an offscreen document.
+ * Creating one twice is an error rather than a no-op, and asking whether one
+ * exists is racy on its own, so both are handled.
+ */
+async function ensureOffscreen() {
+  if (await chrome.offscreen.hasDocument()) return;
   try {
-    // Offscreen documents are the only way a service worker can make sound.
     await chrome.offscreen.createDocument({
       url: 'offscreen.html',
       reasons: ['AUDIO_PLAYBACK'],
       justification: 'Play a short alert tone when Claude finishes or needs you.',
-    }).catch(() => {});
+    });
+  } catch (e) {
+    // Two alerts at once can both find no document and both try to make one.
+    // The loser of that race is fine: the document it wanted now exists.
+    if (!String(e).includes('single offscreen')) throw e;
+  }
+}
+
+/** Play a short tone. Returns true, or a reason it did not.
+ *
+ * Generated with an oscillator rather than shipped as an audio file: it keeps
+ * the extension tiny, and means there is no bundled binary for anyone to have
+ * to trust. Each kind gets its own rhythm, which carries better than pitch.
+ *
+ * It reports failure rather than swallowing it. Swallowing it is exactly how a
+ * missing permission went unnoticed: notifications appeared, no sound ever
+ * played, and nothing anywhere said why.
+ */
+async function play(kind) {
+  const pattern = kind === 'done' ? [0] : kind === 'blocked' ? [0, 220] : [0, 160, 320];
+  const freq = kind === 'done' ? 1046 : kind === 'blocked' ? 880 : 440;
+  try {
+    await ensureOffscreen();
     await chrome.runtime.sendMessage({ type: 'earshot-play', freq, pattern });
-  } catch {
-    // No sound is survivable. The notification still happens.
+    return true;
+  } catch (e) {
+    return String(e && e.message ? e.message : e);
   }
 }
 
@@ -172,11 +199,57 @@ async function runTest() {
       silent: s.sound,
     });
   }
-  if (s.sound) await play('done');
-  return { ok: true, notified: s.notify, played: s.sound };
+  let played = false;
+  let soundError = null;
+  if (s.sound) {
+    const r = await play('done');
+    if (r === true) played = true;
+    else soundError = r;
+  }
+  return { ok: true, notified: s.notify, played, soundError, wantedSound: s.sound };
+}
+
+/** Ask the desktop app whether it is there.
+ *
+ * The old switch only wrote a preference: it never checked anything, so turning
+ * it on looked identical whether the app was set up or not. This actually
+ * speaks to it and reports what came back.
+ */
+function pingBridge() {
+  return new Promise((resolve) => {
+    try {
+      chrome.runtime.sendNativeMessage(BRIDGE, { kind: 'ping' }, (reply) => {
+        const err = chrome.runtime.lastError;
+        if (err) {
+          const text = err.message || String(err);
+          // The two failures worth telling apart: not set up at all, versus set
+          // up and refusing to run.
+          resolve({
+            ok: false,
+            reason: /not found|no such native|not installed/i.test(text)
+              ? 'notfound'
+              : 'failed',
+            detail: text,
+          });
+          return;
+        }
+        resolve({ ok: true, app: reply?.app, notifier: reply?.notifier });
+      });
+    } catch (e) {
+      resolve({ ok: false, reason: 'failed', detail: String(e) });
+    }
+  });
 }
 
 chrome.runtime.onMessage.addListener((msg, _sender, reply) => {
+  if (msg?.type === 'earshot-connect') {
+    pingBridge().then(async (r) => {
+      // Only remembered as on once it has actually answered.
+      await chrome.storage.local.set({ bridge: Boolean(r.ok) });
+      reply(r);
+    });
+    return true;
+  }
   if (!msg || msg.type !== 'earshot-test') return undefined;
   runTest()
     .then(reply)
