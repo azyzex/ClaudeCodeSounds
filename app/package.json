@@ -1,6 +1,6 @@
 {
   "name": "claude-code-sounds-app",
-  "version": "0.5.1",
+  "version": "0.5.2",
   "private": true,
   "description": "Desktop configurator for Claude Code sound alerts",
   "license": "MIT",

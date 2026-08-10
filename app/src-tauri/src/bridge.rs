@@ -356,7 +356,29 @@ fn store_limits(message: &serde_json::Value) -> Result<(), &'static str> {
     Ok(())
 }
 
+/// Record that the browser was here.
+///
+/// The app cannot start a conversation with the extension: native messaging is
+/// browser-initiated, always. So the app proves the link by reporting when the
+/// browser last spoke to it, which is the honest half it can actually observe.
+fn stamp_contact(kind: &str) {
+    let Some(dir) = claude_dir() else { return };
+    let _ = std::fs::create_dir_all(&dir);
+    let _ = std::fs::write(
+        dir.join("earshot-last-contact"),
+        format!(
+            "{}
+{}
+",
+            crate::limits::epoch_now(),
+            kind
+        ),
+    );
+}
+
 fn handle(message: &serde_json::Value) -> serde_json::Value {
+    let kind = message.get("kind").and_then(|v| v.as_str()).unwrap_or("");
+    stamp_contact(kind);
     let kind = message.get("kind").and_then(|v| v.as_str()).unwrap_or("");
     // A ping so the extension can prove the link works instead of assuming it.
     // It does nothing and says so, which is the point.
@@ -436,6 +458,8 @@ pub struct Status {
     pub notifier: bool,
     /// Where the browser's usage readings land, once any arrive.
     pub last_reading: Option<String>,
+    /// When the browser last spoke to us, and what it said.
+    pub last_contact: Option<String>,
 }
 
 pub fn status() -> Status {
@@ -474,6 +498,20 @@ pub fn status() -> Status {
         program,
         notifier,
         last_reading,
+        last_contact: claude_dir()
+            .map(|d| d.join("earshot-last-contact"))
+            .and_then(|p| std::fs::read_to_string(p).ok())
+            .and_then(|text| {
+                let mut lines = text.lines();
+                let at: i64 = lines.next()?.trim().parse().ok()?;
+                let kind = lines.next().unwrap_or("something").trim().to_string();
+                let ago = crate::limits::epoch_now() - at;
+                Some(format!(
+                    "{} ({})",
+                    crate::limits::human_gap(ago.max(1)),
+                    kind
+                ))
+            }),
     }
 }
 

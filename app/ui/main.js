@@ -753,6 +753,11 @@ async function showBridge() {
     lines.push('The notifier is not installed, so alerts would have nothing to play. Install the alerts first.');
   }
   lines.push(
+    s.last_contact
+      ? `The browser last spoke to this app ${s.last_contact} ago.`
+      : 'The browser has never spoken to this app yet.'
+  );
+  lines.push(
     s.last_reading
       ? 'A usage reading from the browser has arrived.'
       : 'No usage reading from the browser yet. Open a claude.ai tab with the extension on.'

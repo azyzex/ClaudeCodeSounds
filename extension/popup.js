@@ -157,6 +157,27 @@ document.getElementById('connect')?.addEventListener('click', () => {
   });
 });
 
+document.getElementById('bridgetest')?.addEventListener('click', (e) => {
+  const state = document.getElementById('bridgestate');
+  e.target.disabled = true;
+  if (state) state.textContent = 'Sending...';
+  chrome.runtime.sendMessage({ type: 'earshot-bridge-test' }, (r) => {
+    e.target.disabled = false;
+    if (chrome.runtime.lastError) {
+      if (state) state.textContent = 'The extension is not running. Reload it.';
+      return;
+    }
+    if (r?.ok) {
+      if (state) {
+        state.textContent =
+          'Sent. Your machine should have made the same sound it makes for the terminal.';
+      }
+      return;
+    }
+    showBridge(r);
+  });
+});
+
 document.getElementById('test')?.addEventListener('click', () => {
   const out = document.getElementById('testresult');
   if (out) out.textContent = 'Playing...';

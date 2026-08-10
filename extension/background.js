@@ -294,6 +294,25 @@ chrome.runtime.onMessage.addListener((msg, _sender, reply) => {
     play('done').then((r) => reply({ ok: r === true, error: r === true ? null : r }));
     return true;
   }
+  if (msg?.type === 'earshot-bridge-test') {
+    // A real alert, not a lookalike: it goes through the same path a finished
+    // turn does, so what it proves is the thing that will actually happen.
+    pingBridge().then((r) => {
+      if (!r.ok) {
+        reply(r);
+        return;
+      }
+      chrome.runtime.sendNativeMessage(BRIDGE, { kind: 'done' }, (out) => {
+        const err = chrome.runtime.lastError;
+        reply(
+          err
+            ? { ok: false, reason: 'failed', detail: err.message || String(err) }
+            : { ok: true, sent: true, app: r.app, reply: out }
+        );
+      });
+    });
+    return true;
+  }
   if (msg?.type === 'earshot-connect') {
     pingBridge().then(async (r) => {
       // Only remembered as on once it has actually answered.
