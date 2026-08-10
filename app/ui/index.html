@@ -149,7 +149,51 @@
 
   <footer>
     <span id="confpath" class="muted mono"></span>
+    <button id="about-open" class="linkish">About</button>
   </footer>
+
+  <!-- A native dialog rather than a hand-rolled overlay: Escape closes it, the
+       backdrop comes free, and focus is trapped without any of it being our
+       problem. -->
+  <dialog id="about">
+    <h2>Claude Code Sounds</h2>
+    <p class="muted" id="about-version">Version &mdash;</p>
+
+    <p>
+      A sound when Claude finishes, when it needs you, and when your usage
+      limit resets. It is meant to let you look away from the terminal without
+      losing your place.
+    </p>
+
+    <h3>How it stays cheap</h3>
+    <p class="muted">
+      The usage figures are ones Claude already hands your machine. Reading
+      them runs no model, so nothing here can use up the limit it reports, and
+      no tokens are ever spent.
+    </p>
+
+    <h3>What leaves your machine</h3>
+    <p class="muted">
+      Nothing, unless you switch it on. There is no analytics and no telemetry.
+      Phone alerts are off by default and go only to the server you name.
+    </p>
+
+    <h3>Made by</h3>
+    <p class="muted">Mohamed Aziz Guenni &mdash; Azyzex</p>
+
+    <div class="about-links">
+      <a href="#" data-url="https://github.com/azyzex/ClaudeCodeSounds">Project on GitHub</a>
+      <a href="#" data-url="https://github.com/azyzex/ClaudeCodeSounds/issues">Report a problem</a>
+      <a href="#" data-url="https://github.com/azyzex/ClaudeCodeSounds/blob/main/NOTICE.md">Privacy and licence</a>
+    </div>
+
+    <p class="muted small">
+      Not affiliated with, endorsed by, or sponsored by Anthropic. Claude is a
+      trademark of Anthropic.
+    </p>
+
+    <button id="about-close" class="ghost">Close</button>
+  </dialog>
 
   <script src="main.js"></script>
 </body>

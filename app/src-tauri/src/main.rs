@@ -27,6 +27,8 @@ struct AppState {
     platform: &'static str,
     /// Epoch second a temporary mute expires, if one is running.
     muted_until: Option<u64>,
+    /// Shown in the About dialog, so a bug report can name the build.
+    version: &'static str,
 }
 
 /// Start a program without a console window blinking on screen.
@@ -91,6 +93,7 @@ fn load_state() -> Result<AppState, String> {
             .unwrap_or_default(),
         platform: if is_unix() { "unix" } else { "windows" },
         muted_until: muted_until(),
+        version: env!("CARGO_PKG_VERSION"),
     })
 }
 
@@ -149,6 +152,36 @@ fn preview(kind: String) -> Result<String, String> {
     .map_err(|e| format!("could not run the notifier: {}", e))?;
 
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+}
+
+/// Open one of this project's own links in the default browser.
+///
+/// An allowlist, deliberately, rather than a check that the string looks like a
+/// URL. The window only ever needs these three, and "open whatever the page
+/// asks for" is how a bug in the UI turns into a way to launch things.
+#[tauri::command]
+fn open_url(url: String) -> Result<(), String> {
+    const ALLOWED: [&str; 3] = [
+        "https://github.com/azyzex/ClaudeCodeSounds",
+        "https://github.com/azyzex/ClaudeCodeSounds/issues",
+        "https://github.com/azyzex/ClaudeCodeSounds/blob/main/NOTICE.md",
+    ];
+    if !ALLOWED.contains(&url.as_str()) {
+        return Err("that link is not one of this app's own".to_string());
+    }
+
+    let result = if cfg!(target_os = "windows") {
+        // The empty string is the window title start(1) expects first; without
+        // it a quoted url would be taken as the title and nothing would open.
+        spawn("cmd").args(["/C", "start", "", &url]).spawn()
+    } else if cfg!(target_os = "macos") {
+        spawn("open").arg(&url).spawn()
+    } else {
+        spawn("xdg-open").arg(&url).spawn()
+    };
+    result
+        .map(|_| ())
+        .map_err(|e| format!("could not open your browser: {}", e))
 }
 
 fn debounce_stamp() -> Option<PathBuf> {
@@ -678,7 +711,8 @@ fn main() {
             quiet_for,
             set_launch_at_login,
             set_hooks,
-            read_limits
+            read_limits,
+            open_url
         ])
         .run(tauri::generate_context!())
         .expect("error while running the app");

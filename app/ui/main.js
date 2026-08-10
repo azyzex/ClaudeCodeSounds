@@ -366,6 +366,9 @@ async function renderLog() {
 async function load() {
   state = await invoke('load_state');
   $('confpath').textContent = state.conf_path;
+  // The build number belongs in About, so a bug report can name it.
+  const ver = document.getElementById('about-version');
+  if (ver && state.version) ver.textContent = `Version ${state.version}`;
   renderInstallState();
   renderEvents();
   bindGeneral();
@@ -440,59 +443,152 @@ function windowRow(name, w) {
   return row;
 }
 
-async function showLimits() {
+/// Turn whatever came back from the command into something worth reading.
+///
+/// The previous version swallowed every failure, which meant a broken home
+/// directory and a working-but-empty one looked identical: nothing happened and
+/// you were left to guess.
+function limitsError(err) {
+  const text = typeof err === 'string' ? err : err?.message || String(err);
+  if (/home directory/i.test(text)) {
+    return 'Could not work out your home folder, so there is nowhere to read from.';
+  }
+  if (/permission|denied|os error 5/i.test(text)) {
+    return 'Not allowed to read the usage files in your .claude folder.';
+  }
+  return `Could not read the usage files: ${text}`;
+}
+
+let checking = false;
+
+async function showLimits({ manual = false } = {}) {
   const host = document.getElementById('limits');
   if (!host) return;
-  let sources = [];
+  // The minute timer must not fight a click, and a second click while the first
+  // is still going would race two redraws onto the same element.
+  if (checking) return;
+
+  const button = document.getElementById('refresh-limits');
+  checking = true;
+  if (manual && button) {
+    button.disabled = true;
+    button.classList.add('busy');
+    button.textContent = 'Checking';
+  }
+
+  let sources = null;
+  let failure = null;
   try {
     sources = await invoke('read_limits');
-  } catch {
-    // A missing home directory is not worth a scary message.
+  } catch (err) {
+    failure = limitsError(err);
   }
 
-  host.textContent = '';
-  if (!sources.length) {
-    const p = document.createElement('p');
-    p.className = 'hint';
-    p.textContent =
-      'Nothing known yet. Open Claude Code once, or a claude.ai tab with the ' +
-      'browser extension, and the times appear here.';
-    host.append(p);
-    return;
-  }
+  // Reading local files is usually instant, and a spinner that appears and
+  // vanishes within one frame reads as a glitch rather than as progress. This
+  // holds the busy state just long enough to be seen as deliberate.
+  if (manual) await new Promise((r) => setTimeout(r, 220));
 
-  // Sources are shown separately and never merged: the window is per account,
-  // so combining two would report one account's reset time under the other's
-  // name. The label only appears when there is more than one, so the ordinary
-  // case stays uncluttered.
-  for (const s of sources) {
-    if (sources.length > 1) {
-      const from = document.createElement('div');
-      from.className = 'from';
-      from.textContent = s.account ? `from ${s.source}, account ${s.account}` : `from ${s.source}`;
-      host.append(from);
+  try {
+    if (failure !== null) {
+      host.textContent = '';
+      const p = document.createElement('p');
+      p.className = 'hint error';
+      p.textContent = failure;
+      host.append(p);
+      return;
     }
-    const five = windowRow('5 hours', s.five_hour);
-    const week = windowRow('7 days', s.seven_day);
-    if (five) host.append(five);
-    if (week) host.append(week);
 
-    if (s.updated) {
-      const seen = document.createElement('div');
-      seen.className = 'from';
-      // Stale figures are worth flagging: nothing has read the numbers in a
-      // while, so a window may have rolled over without anything noticing.
-      const stale = Date.now() - s.updated * 1000 > 6 * 3600 * 1000;
-      if (stale) seen.classList.add('stale');
-      seen.textContent = stale
-        ? `last seen ${agoText(s.updated)}, so this may be out of date`
-        : `last seen ${agoText(s.updated)}`;
-      host.append(seen);
+    host.textContent = '';
+    if (!sources.length) {
+      const p = document.createElement('p');
+      p.className = 'hint';
+      p.textContent =
+        'Nothing known yet. Open Claude Code once, or a claude.ai tab with the ' +
+        'browser extension, and the times appear here.';
+      host.append(p);
+      return;
+    }
+
+    // Sources are shown separately and never merged: the window is per account,
+    // so combining two would report one account's reset time under the other's
+    // name. The label only appears when there is more than one, so the ordinary
+    // case stays uncluttered.
+    for (const s of sources) {
+      if (sources.length > 1) {
+        const from = document.createElement('div');
+        from.className = 'from';
+        from.textContent = s.account
+          ? `from ${s.source}, account ${s.account}`
+          : `from ${s.source}`;
+        host.append(from);
+      }
+      const five = windowRow('5 hours', s.five_hour);
+      const week = windowRow('7 days', s.seven_day);
+      if (five) host.append(five);
+      if (week) host.append(week);
+
+      if (s.updated) {
+        const seen = document.createElement('div');
+        seen.className = 'from';
+        // Stale figures are worth flagging: nothing has read the numbers in a
+        // while, so a window may have rolled over without anything noticing.
+        const stale = Date.now() - s.updated * 1000 > 6 * 3600 * 1000;
+        if (stale) seen.classList.add('stale');
+        seen.textContent = stale
+          ? `last seen ${agoText(s.updated)}, so this may be out of date`
+          : `last seen ${agoText(s.updated)}`;
+        host.append(seen);
+      }
+    }
+
+    // Confirmation that the click did something. Numbers that are the same as
+    // before are the common case, so without this a successful check is
+    // indistinguishable from a dead button.
+    if (manual) {
+      host.classList.remove('refreshed');
+      // Reading offsetWidth restarts the animation; without it a second click
+      // in quick succession would show nothing at all.
+      void host.offsetWidth;
+      host.classList.add('refreshed');
+    }
+  } finally {
+    checking = false;
+    if (manual && button) {
+      button.disabled = false;
+      button.classList.remove('busy');
+      button.textContent = 'Check usage';
     }
   }
 }
 
-document.getElementById('refresh-limits')?.addEventListener('click', showLimits);
+document
+  .getElementById('refresh-limits')
+  ?.addEventListener('click', () => showLimits({ manual: true }));
 showLimits();
 // The countdown should not go stale while the window sits open.
 setInterval(showLimits, 60000);
+
+// ---------------------------------------------------------------- about ---
+
+const about = document.getElementById('about');
+document.getElementById('about-open')?.addEventListener('click', () => about?.showModal());
+document.getElementById('about-close')?.addEventListener('click', () => about?.close());
+// Clicking the backdrop closes it, which is what everyone expects of a dialog.
+about?.addEventListener('click', (e) => {
+  if (e.target === about) about.close();
+});
+
+// Links go through a command with a fixed allowlist rather than being opened by
+// the page, because this window has no shell or network permission at all and
+// should not gain one for three URLs.
+for (const link of document.querySelectorAll('.about-links a')) {
+  link.addEventListener('click', async (e) => {
+    e.preventDefault();
+    try {
+      await invoke('open_url', { url: link.dataset.url });
+    } catch (err) {
+      link.textContent = 'Could not open your browser';
+    }
+  });
+}
