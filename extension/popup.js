@@ -105,7 +105,11 @@ function showBridge(r) {
     if (button) button.textContent = 'Check again';
     return;
   }
-  if (r?.reason === 'notfound') {
+  if (r?.reason === 'denied') {
+    state.textContent =
+      'Permission was not given, so the extension cannot reach the app. ' +
+      'Press the button again and choose Allow.';
+  } else if (r?.reason === 'notfound') {
     state.textContent =
       'The desktop app is not set up for this yet. Open Claude Code Sounds, ' +
       'go to Browser, turn the switch on, then press this again.';

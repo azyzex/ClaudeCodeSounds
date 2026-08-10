@@ -111,6 +111,10 @@ function updateBadge(five) {
 // prevent, and until now nothing said anything on the way up.
 const WARN_AT = 80;
 
+// Held in the worker as well as in storage, because storage is asynchronous and
+// the gap between reading and writing it is exactly where the duplicates got in.
+let warnedRightNow = null;
+
 async function warnIfNearLimit(five) {
   if (!five || typeof five.utilization !== 'number') return;
   const pct = Math.round(five.utilization);
@@ -121,14 +125,24 @@ async function warnIfNearLimit(five) {
   if (pct < WARN_AT) {
     // Dropped as soon as usage falls back, which means the window rolled over.
     if (warnedFor) await chrome.storage.local.set({ warnedFor: null });
+    warnedRightNow = null;
     return;
   }
   if (warnedFor === key) return;
+  // Claimed before the notification is made, not after. Several polls can be in
+  // flight at once - the alarm, the worker waking, and every time the popup is
+  // opened - and each was reading "not warned yet" before any of them wrote it.
+  // That is how one warning arrived five times.
+  if (warnedRightNow === key) return;
+  warnedRightNow = key;
   await chrome.storage.local.set({ warnedFor: key });
 
   const { enabled, notify } = await chrome.storage.local.get({ enabled: true, notify: true });
   if (!enabled || !notify) return;
-  chrome.notifications.create('', {
+  // A fixed id, so a repeat replaces the notification rather than stacking
+  // another one beside it. Belt and braces with the guard above, because five
+  // notifications is the kind of bug that must not come back.
+  chrome.notifications.create('earshot-warn', {
     type: 'basic',
     iconUrl: 'icons/128x128.png',
     title: `${pct}% of your 5 hour window used`,

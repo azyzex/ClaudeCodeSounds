@@ -211,11 +211,33 @@ async function runTest() {
 
 /** Ask the desktop app whether it is there.
  *
+ *
  * The old switch only wrote a preference: it never checked anything, so turning
  * it on looked identical whether the app was set up or not. This actually
  * speaks to it and reports what came back.
  */
-function pingBridge() {
+async function pingBridge() {
+  // nativeMessaging is optional on purpose: it is the only permission that
+  // lets anything reach outside the browser, so it is not held until asked
+  // for. Until it is granted the API does not exist at all, which is what
+  // "sendNativeMessage is not a function" was telling us.
+  let granted = false;
+  try {
+    granted = await chrome.permissions.contains({ permissions: ['nativeMessaging'] });
+    if (!granted) {
+      granted = await chrome.permissions.request({ permissions: ['nativeMessaging'] });
+    }
+  } catch (e) {
+    return { ok: false, reason: 'failed', detail: String(e) };
+  }
+  if (!granted) {
+    return {
+      ok: false,
+      reason: 'denied',
+      detail: 'Permission to talk to the desktop app was not given.',
+    };
+  }
+
   return new Promise((resolve) => {
     try {
       chrome.runtime.sendNativeMessage(BRIDGE, { kind: 'ping' }, (reply) => {
