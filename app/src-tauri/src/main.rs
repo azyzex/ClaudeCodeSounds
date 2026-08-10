@@ -37,6 +37,9 @@ struct AppState {
 ///
 /// Every spawn in this app goes through here, so a future one cannot forget.
 fn spawn(program: &str) -> Command {
+    // Everywhere but Windows the block below compiles away, leaving nothing to
+    // mutate. The binding still has to be `mut` for the Windows build.
+    #[allow(unused_mut)]
     let mut command = Command::new(program);
     #[cfg(windows)]
     {
