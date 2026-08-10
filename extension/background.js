@@ -27,6 +27,14 @@ const TEXT = {
   limit: { title: 'Claude hit a limit', body: 'You have run out of messages for now.' },
 };
 
+/** Which Claude this was, for the notification title.
+ *
+ * With several terminals and a browser all alerting, "Claude is done" answers
+ * the wrong question. The desktop alerts name the project folder; these name
+ * the browser, so the two can be told apart at a glance on the same screen.
+ */
+const SOURCE = 'browser';
+
 const BRIDGE = 'com.azyzex.earshot';
 
 async function settings() {
@@ -151,7 +159,7 @@ chrome.runtime.onMessage.addListener((msg, sender) => {
         {
           type: 'basic',
           iconUrl: 'icons/128x128.png',
-          title: t.title,
+          title: `${t.title} - ${SOURCE}`,
           message: t.body,
           silent: s.sound,        // the tone is ours, so do not double up
         },
@@ -224,8 +232,8 @@ async function runTest() {
     chrome.notifications.create('', {
       type: 'basic',
       iconUrl: 'icons/128x128.png',
-      title: 'Earshot is working',
-      message: 'This is what an alert looks like.',
+      title: `Earshot is working - ${SOURCE}`,
+      message: 'This is what an alert from your browser looks like.',
       silent: s.sound,
     });
   }
@@ -266,7 +274,7 @@ function openPort() {
     chrome.notifications.create('earshot-apptest', {
       type: 'basic',
       iconUrl: 'icons/128x128.png',
-      title: 'Test from the desktop app',
+      title: `Test from the desktop app - ${SOURCE}`,
       message: 'Your desktop app reached this browser. The link works both ways.',
     });
     play('done');

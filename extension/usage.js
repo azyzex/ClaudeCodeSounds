@@ -145,7 +145,9 @@ async function warnIfNearLimit(five) {
   chrome.notifications.create('earshot-warn', {
     type: 'basic',
     iconUrl: 'icons/128x128.png',
-    title: `${pct}% of your 5 hour window used`,
+    // Named like every other browser alert, so several sources on one screen
+    // stay tellable apart.
+    title: `${pct}% of your 5 hour window used - browser`,
     message: 'Worth finishing what you are on rather than starting something long.',
   });
 }

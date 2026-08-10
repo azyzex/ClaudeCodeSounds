@@ -654,48 +654,53 @@ async function showLimits({ manual = false } = {}) {
       return;
     }
 
-    // Sources are shown separately and never merged: the window is per account,
-    // so combining two would report one account's reset time under the other's
-    // name. The label only appears when there is more than one, so the ordinary
-    // case stays uncluttered.
-    for (const s of sources) {
-      if (sources.length > 1) {
+    // One set of bars per account, not per source. Claude Code and the browser
+    // reading the same account are the same window, and showing it twice was
+    // just noise. Two accounts still get two blocks, which is the case the
+    // separation existed for.
+    //
+    // The status line does not report an account at all, so a source without
+    // one joins the single known account when there is exactly one. With two
+    // known accounts it cannot be placed, and is shown on its own rather than
+    // guessed into the wrong one.
+    const known = [...new Set(sources.map((x) => x.account).filter(Boolean))];
+    const groups = new Map();
+    for (const src of sources) {
+      const key = src.account || (known.length === 1 ? known[0] : 'unknown');
+      const existing = groups.get(key);
+      // The freshest reading wins: they describe the same window, so the newer
+      // one is simply more current.
+      if (!existing || (src.updated || 0) > (existing.updated || 0)) {
+        groups.set(key, src);
+      }
+    }
+
+    for (const [account, s2] of groups) {
+      if (groups.size > 1) {
         const from = document.createElement('div');
         from.className = 'from';
-        from.textContent = s.account
-          ? `from ${s.source}, account ${s.account}`
-          : `from ${s.source}`;
+        from.textContent = account === 'unknown' ? 'another account' : `account ${account}`;
         host.append(from);
       }
-      const five = windowRow('5 hours', s.five_hour);
-      const week = windowRow('7 days', s.seven_day);
+      const five = windowRow('5 hours', s2.five_hour);
+      const week = windowRow('7 days', s2.seven_day);
       if (five) host.append(five);
       if (week) host.append(week);
 
-      if (s.updated) {
+      if (s2.updated) {
         const seen = document.createElement('div');
         seen.className = 'from';
         // Stale figures are worth flagging: nothing has read the numbers in a
         // while, so a window may have rolled over without anything noticing.
-        const stale = Date.now() - s.updated * 1000 > 6 * 3600 * 1000;
+        const stale = Date.now() - s2.updated * 1000 > 6 * 3600 * 1000;
         if (stale) seen.classList.add('stale');
         seen.textContent = stale
-          ? `last seen ${agoText(s.updated)}, so this may be out of date`
-          : `last seen ${agoText(s.updated)}`;
+          ? `last seen ${agoText(s2.updated)}, so this may be out of date`
+          : `last seen ${agoText(s2.updated)}`;
         host.append(seen);
       }
     }
 
-    // Confirmation that the click did something. Numbers that are the same as
-    // before are the common case, so without this a successful check is
-    // indistinguishable from a dead button.
-    if (manual) {
-      host.classList.remove('refreshed');
-      // Reading offsetWidth restarts the animation; without it a second click
-      // in quick succession would show nothing at all.
-      void host.offsetWidth;
-      host.classList.add('refreshed');
-    }
   } finally {
     checking = false;
     if (manual && button) {
