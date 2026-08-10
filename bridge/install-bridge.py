@@ -23,6 +23,12 @@ import shutil
 import sys
 
 HOST_NAME = 'com.azyzex.earshot'
+
+# The extension pins its own id by carrying a public key in its manifest, so it
+# is the same on every machine and there is nothing to copy. Passing
+# --extension-id is still allowed, for a fork or a store build with a different
+# key, but nobody should have to.
+DEFAULT_EXTENSION_ID = 'gkinjfdcpheaejgdcdmhocpnfianbmpf'
 HERE = os.path.dirname(os.path.abspath(__file__))
 
 # Where each browser looks for host manifests. Chromium browsers and Firefox use
@@ -165,20 +171,17 @@ def main():
     if args.uninstall:
         return uninstall()
 
-    if not args.extension_id:
-        print('  --extension-id is required.')
-        print('')
-        print('  Open chrome://extensions, find Earshot for Web, and copy its ID.')
-        print('  It is required rather than defaulted because that ID is the')
-        print('  allowlist: a manifest trusting any extension would let any')
-        print('  extension on this machine start the bridge.')
-        return 2
+    extension_id = args.extension_id or DEFAULT_EXTENSION_ID
+    if extension_id == DEFAULT_EXTENSION_ID:
+        print('  using the published extension id')
+    else:
+        print('  using the id you gave: %s' % extension_id)
 
     if not shutil.which(sys.executable):
         print('  could not find the python that is running this')
         return 1
 
-    return install(args.extension_id)
+    return install(extension_id)
 
 
 if __name__ == '__main__':

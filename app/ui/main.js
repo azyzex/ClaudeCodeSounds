@@ -374,6 +374,8 @@ async function renderLog() {
 async function load() {
   state = await invoke('load_state');
   $('confpath').textContent = state.conf_path;
+  const bridgeToggle = document.getElementById('bridge-toggle');
+  if (bridgeToggle) bridgeToggle.checked = Boolean(state.bridge_installed);
   // The build number belongs in About, so a bug report can name it.
   const ver = document.getElementById('about-version');
   if (ver && state.version) ver.textContent = `Version ${state.version}`;
@@ -576,6 +578,26 @@ document
 showLimits();
 // The countdown should not go stale while the window sits open.
 setInterval(showLimits, 60000);
+
+// --------------------------------------------------------------- browser ---
+
+// This used to be a terminal command plus an extension id copied out of
+// chrome://extensions. The app registers itself as the browser's link instead,
+// so there is nothing to copy and no Python to install.
+document.getElementById('bridge-toggle')?.addEventListener('change', async (e) => {
+  const on = e.target.checked;
+  e.target.disabled = true;
+  try {
+    status(await invoke('set_bridge', { enable: on }), 'ok');
+  } catch (err) {
+    status(String(err), 'err');
+    // Put the switch back where it was: leaving it showing a state that was
+    // never reached is how someone ends up believing this is set up.
+    e.target.checked = !on;
+  } finally {
+    e.target.disabled = false;
+  }
+});
 
 // ---------------------------------------------------------------- about ---
 

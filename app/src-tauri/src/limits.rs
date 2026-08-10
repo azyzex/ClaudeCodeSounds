@@ -115,6 +115,10 @@ pub fn read_all(dir: &Path) -> Vec<Source> {
 }
 
 /// Seconds since the epoch, or 0 if the clock is before 1970.
+pub fn epoch_now() -> i64 {
+    now()
+}
+
 fn now() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -170,6 +174,58 @@ pub fn tooltip(dir: &Path) -> String {
     }
 }
 
+/// An ISO 8601 instant as a unix second, or None.
+///
+/// Written out rather than pulling in a date crate, because exactly one shape
+/// arrives here: what claude.ai puts in `resets_at`, which is
+/// `2026-08-09T22:00:00.000000+00:00` or the same with a `Z`. Anything else is
+/// refused rather than guessed at.
+pub fn parse_iso8601(text: &str) -> Option<i64> {
+    let bytes = text.as_bytes();
+    if bytes.len() < 19 {
+        return None;
+    }
+    let num = |a: usize, b: usize| text.get(a..b)?.parse::<i64>().ok();
+    let (y, mo, d) = (num(0, 4)?, num(5, 7)?, num(8, 10)?);
+    let (h, mi, s) = (num(11, 13)?, num(14, 16)?, num(17, 19)?);
+    if !(1..=12).contains(&mo) || !(1..=31).contains(&d) {
+        return None;
+    }
+    if h > 23 || mi > 59 || s > 60 {
+        return None;
+    }
+
+    // Days since the epoch, by the civil-from-days algorithm. Leap years and
+    // century rules included, which is the whole reason not to do this by hand
+    // twice.
+    let yy = if mo <= 2 { y - 1 } else { y };
+    let era = if yy >= 0 { yy } else { yy - 399 } / 400;
+    let yoe = yy - era * 400;
+    let mp = (mo + 9) % 12;
+    let doy = (153 * mp + 2) / 5 + d - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    let days = era * 146097 + doe - 719468;
+
+    let mut secs = days * 86400 + h * 3600 + mi * 60 + s;
+
+    // The offset, if one is given. A time with no offset is taken as UTC, which
+    // is what this endpoint sends.
+    let tail = &text[19..];
+    let sign_at = tail.find(['+', '-']);
+    if let Some(i) = sign_at {
+        let sign = if tail.as_bytes()[i] == b'-' { -1 } else { 1 };
+        let rest = &tail[i + 1..];
+        let oh: i64 = rest.get(0..2)?.parse().ok()?;
+        let om: i64 = rest
+            .get(3..5)
+            .or_else(|| rest.get(2..4))
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(0);
+        secs -= sign * (oh * 3600 + om * 60);
+    }
+    Some(secs)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -190,6 +246,47 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         dir
+    }
+
+    #[test]
+    fn iso_timestamps_become_the_right_instant() {
+        // Checked against known epochs rather than against itself: hand-rolled
+        // calendar maths that only agrees with its own assumptions is worth
+        // nothing.
+        assert_eq!(parse_iso8601("1970-01-01T00:00:00Z"), Some(0));
+        assert_eq!(parse_iso8601("2000-01-01T00:00:00Z"), Some(946_684_800));
+        assert_eq!(parse_iso8601("2026-08-09T22:00:00Z"), Some(1_786_312_800));
+        // Leap day, and the century rule that makes 2000 a leap year.
+        assert_eq!(parse_iso8601("2024-02-29T12:00:00Z"), Some(1_709_208_000));
+        // No offset means UTC, which is what the endpoint sends.
+        assert_eq!(
+            parse_iso8601("2026-08-09T22:00:00.000000"),
+            parse_iso8601("2026-08-09T22:00:00Z")
+        );
+        // An offset moves the instant, and both spellings are accepted.
+        assert_eq!(
+            parse_iso8601("2026-08-09T23:00:00+01:00"),
+            parse_iso8601("2026-08-09T22:00:00Z")
+        );
+        assert_eq!(
+            parse_iso8601("2026-08-09T21:00:00-0100"),
+            parse_iso8601("2026-08-09T22:00:00Z")
+        );
+    }
+
+    #[test]
+    fn nonsense_timestamps_are_refused_not_guessed_at() {
+        for bad in [
+            "",
+            "tomorrow",
+            "2026-08-09",
+            "2026-13-45T99:99:99Z",
+            "2026-00-09T00:00:00Z",
+            "2026-08-09T24:00:00Z",
+            "not-a-date-at-all!!",
+        ] {
+            assert_eq!(parse_iso8601(bad), None, "{:?} should be refused", bad);
+        }
     }
 
     #[test]

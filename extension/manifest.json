@@ -2,6 +2,7 @@
   "manifest_version": 3,
   "name": "Earshot for Web",
   "version": "0.1.0",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAsaZpzSzhyU8kkc0HUtq8oDIcDkao9kd1C4LdH9x/qqC2emrMLw5AVCkcmEV3tTDURWd2nZEq5hV4ofpbGQl8rhS+HcsdEeXKlTpbJG49RZE1Qq7LF5wKMYcFR8yX9nmh1ArQr1/gmD2fPfc/fO+N757zU9t5RzrAYWR9uAtPn+3ltT1YEN6+pmU29gm3xHZ/ZUD28LC/JQCaeHO3vnNz/QTlTGdpjR+TFbBS6wEFeMpBUc6/1s0xyq/U73f5FocyS8kWauv39l+e3Xa7y7Wb2FMTIYRi/QLivN6nHkYFvwrIWHYPanLNckf4h8oewBmAonRduFZhrDdpf140ymuORwIDAQAB",
   "description": "Know when Claude on the web finishes, needs you, or hits a limit. By Azyzex. Not affiliated with Anthropic.",
   "author": "Azyzex",
   "homepage_url": "https://github.com/azyzex/ClaudeCodeSounds",

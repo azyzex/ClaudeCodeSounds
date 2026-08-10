@@ -67,6 +67,20 @@ not touch the very limit it reports.
 
 ## The desktop link
 
+**The easy way: open the desktop app, Browser, and turn on the switch.** There
+is nothing to copy and no terminal. The app registers itself as the link, so
+Python is not needed either.
+
+That works because the extension carries its own public key, which fixes its id
+to the same value on every machine. Before that, Chrome derived the id from the
+folder it was loaded from, every install had a different one, and something had
+to be told which. That is the entire reason setup used to involve a terminal.
+
+If you would rather not install the app, `python bridge/install-bridge.py` still
+does the same job.
+
+### The old details
+
 Off by default. Turn it on and alerts also go to
 [Earshot Bridge](../bridge/), which hands them to the notifier already installed
 on your machine, so the browser and your terminal sound the same and obey the

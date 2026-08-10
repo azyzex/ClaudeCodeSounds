@@ -35,6 +35,26 @@
     </section>
 
     <section class="card">
+      <h2>Browser</h2>
+      <p class="hint">
+        Alerts from Claude in your browser, in the same voice as the ones from
+        your terminal. This also lets the browser tell your machine when your
+        usage window resets, so the countdown stays right even on a day you
+        never open Claude Code.
+      </p>
+
+      <label class="row switch-row">
+        <span class="label">Let the browser extension talk to this app</span>
+        <input type="checkbox" id="bridge-toggle" />
+      </label>
+
+      <p class="hint" id="bridge-note">
+        Turn this on, then install the extension in Chrome and switch on
+        &ldquo;Send to the desktop app&rdquo; there.
+      </p>
+    </section>
+
+    <section class="card">
       <h2>Alerts</h2>
       <p class="muted">Press play to hear a change straight away.</p>
       <div id="events"></div>

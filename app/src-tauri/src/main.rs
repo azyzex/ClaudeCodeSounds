@@ -1,6 +1,7 @@
 // Hide the console window on Windows release builds.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod bridge;
 mod config;
 mod escalate;
 mod hooks;
@@ -29,6 +30,8 @@ struct AppState {
     muted_until: Option<u64>,
     /// Shown in the About dialog, so a bug report can name the build.
     version: &'static str,
+    /// Whether the browsers on this machine know about the bridge yet.
+    bridge_installed: bool,
 }
 
 /// Start a program without a console window blinking on screen.
@@ -94,6 +97,7 @@ fn load_state() -> Result<AppState, String> {
         platform: if is_unix() { "unix" } else { "windows" },
         muted_until: muted_until(),
         version: env!("CARGO_PKG_VERSION"),
+        bridge_installed: bridge::is_installed(),
     })
 }
 
@@ -182,6 +186,20 @@ fn open_url(url: String) -> Result<(), String> {
     result
         .map(|_| ())
         .map_err(|e| format!("could not open your browser: {}", e))
+}
+
+/// Connect or disconnect the browser extension.
+///
+/// This is the whole of what used to be a terminal command and a copied
+/// extension id. The app is already installed and is already a program the
+/// browser can launch, so it registers itself as the bridge.
+#[tauri::command]
+fn set_bridge(enable: bool) -> Result<String, String> {
+    if enable {
+        bridge::install()
+    } else {
+        bridge::uninstall()
+    }
 }
 
 fn debounce_stamp() -> Option<PathBuf> {
@@ -692,6 +710,14 @@ fn read_limits() -> Result<Vec<limits::Source>, String> {
 }
 
 fn main() {
+    // Chrome starts a native messaging host as an ordinary program and talks to
+    // it over stdin and stdout. When that is why we are running, be the bridge
+    // and nothing else: no window, no tray, no updater.
+    if bridge::launched_by_browser() {
+        bridge::run_host();
+        return;
+    }
+
     tauri::Builder::default()
         // Tauri's updater signs releases with its own free keypair, which has
         // nothing to do with the code signing certificates this project does
@@ -712,7 +738,8 @@ fn main() {
             set_launch_at_login,
             set_hooks,
             read_limits,
-            open_url
+            open_url,
+            set_bridge
         ])
         .run(tauri::generate_context!())
         .expect("error while running the app");
