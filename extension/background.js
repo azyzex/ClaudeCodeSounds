@@ -17,6 +17,8 @@ const DEFAULTS = {
   bridge: false,
   // Matches the desktop side: short turns are not worth interrupting for.
   quietKinds: [],
+  tone: 'chime',
+  volume: 60,
 };
 
 const TEXT = {
@@ -69,12 +71,36 @@ async function ensureOffscreen() {
  * missing permission went unnoticed: notifications appeared, no sound ever
  * played, and nothing anywhere said why.
  */
+/** The tones on offer.
+ *
+ * Each is a wave shape and a base pitch. The rhythm still comes from the kind
+ * of alert, so a finish and a question stay tellable apart whichever tone is
+ * chosen.
+ */
+const TONES = {
+  chime: { wave: 'sine', base: 1046 },
+  soft: { wave: 'sine', base: 660 },
+  marimba: { wave: 'triangle', base: 880 },
+  blip: { wave: 'square', base: 740 },
+  deep: { wave: 'triangle', base: 440 },
+};
+
 async function play(kind) {
+  const s = await settings();
+  const tone = TONES[s.tone] || TONES.chime;
   const pattern = kind === 'done' ? [0] : kind === 'blocked' ? [0, 220] : [0, 160, 320];
-  const freq = kind === 'done' ? 1046 : kind === 'blocked' ? 880 : 440;
+  // Pitch shifts with the kind, from the chosen tone's base rather than from a
+  // fixed number, so picking a tone changes all of them together.
+  const freq = kind === 'done' ? tone.base : kind === 'blocked' ? tone.base * 0.84 : tone.base * 0.42;
   try {
     await ensureOffscreen();
-    await chrome.runtime.sendMessage({ type: 'earshot-play', freq, pattern });
+    await chrome.runtime.sendMessage({
+      type: 'earshot-play',
+      freq,
+      pattern,
+      wave: tone.wave,
+      volume: s.volume,
+    });
     return true;
   } catch (e) {
     return String(e && e.message ? e.message : e);
@@ -264,6 +290,10 @@ async function pingBridge() {
 }
 
 chrome.runtime.onMessage.addListener((msg, _sender, reply) => {
+  if (msg?.type === 'earshot-preview') {
+    play('done').then((r) => reply({ ok: r === true, error: r === true ? null : r }));
+    return true;
+  }
   if (msg?.type === 'earshot-connect') {
     pingBridge().then(async (r) => {
       // Only remembered as on once it has actually answered.

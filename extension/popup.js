@@ -121,6 +121,27 @@ function showBridge(r) {
   if (button) button.textContent = 'Connect to the desktop app';
 }
 
+/** Play the chosen tone, so picking one is by ear rather than by name. */
+function previewTone() {
+  chrome.runtime.sendMessage({ type: 'earshot-preview' }, () => {
+    void chrome.runtime.lastError;
+  });
+}
+
+const tone = document.getElementById('tone');
+tone?.addEventListener('change', async () => {
+  await chrome.storage.local.set({ tone: tone.value });
+  previewTone();
+});
+
+const volume = document.getElementById('volume');
+// On release rather than on every step: dragging a slider would otherwise fire
+// a sound for each notch it passes.
+volume?.addEventListener('change', async () => {
+  await chrome.storage.local.set({ volume: Number(volume.value) });
+  previewTone();
+});
+
 document.getElementById('connect')?.addEventListener('click', () => {
   const state = document.getElementById('bridgestate');
   const button = document.getElementById('connect');
@@ -167,6 +188,8 @@ document.getElementById('test')?.addEventListener('click', () => {
 chrome.storage.local.get(null).then((s) => {
   render(s);
   applyEnabled(s.enabled !== false);
+  if (tone) tone.value = s.tone || 'chime';
+  if (volume) volume.value = s.volume ?? 60;
   // Shows the last known state without speaking to the app, so opening the
   // popup stays instant. The button is what actually checks.
   if (s.bridge) showBridge({ ok: true, app: s.bridgeVersion || '?' });

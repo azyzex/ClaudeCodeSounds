@@ -18,6 +18,22 @@
 <div id="settings">
   <label class="row"><span>Play a sound</span><input type="checkbox" id="sound"></label>
   <label class="row"><span>Show a notification</span><input type="checkbox" id="notify"></label>
+
+  <label class="row">
+    <span>Sound</span>
+    <select id="tone">
+      <option value="chime">Chime</option>
+      <option value="soft">Soft</option>
+      <option value="marimba">Marimba</option>
+      <option value="blip">Blip</option>
+      <option value="deep">Deep</option>
+    </select>
+  </label>
+
+  <label class="row">
+    <span>Volume</span>
+    <input type="range" id="volume" min="0" max="100" step="5">
+  </label>
   <button id="test">Test an alert</button>
   <p class="hint" id="testresult"></p>
 

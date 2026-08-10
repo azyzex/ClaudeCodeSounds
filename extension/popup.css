@@ -33,3 +33,5 @@ input.big { transform: scale(1.35); transform-origin: right center; }
 #testresult:empty { display: none; }
 
 #connect { width: 100%; margin-top: .3rem; padding: .4rem; cursor: pointer; }
+
+select, input[type="range"] { max-width: 9rem; }
