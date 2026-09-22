@@ -17,6 +17,18 @@ param([ValidateSet('mark','done','blocked','limit','error','limit-reset','weekly
 
 $ErrorActionPreference = 'SilentlyContinue'
 
+# Seconds since the Unix epoch, correctly.
+#
+# Get-Date -UFormat %s is wrong on every machine that is not on UTC: Windows
+# PowerShell formats the LOCAL time as though it were UTC, so a clock one hour
+# ahead of UTC returns a value one hour too large. That is not a rounding
+# detail, it is the reason every reset alert arrived exactly one timezone
+# offset early: the watcher believed "now" was already past the reset.
+function Get-Epoch {
+    return [int][DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
+}
+
+
 $confFile = Join-Path $env:USERPROFILE '.claude\claude-notify.conf'
 $soundDir = Join-Path $env:USERPROFILE '.claude\claude-sounds'
 $debug    = ($env:CLAUDE_NOTIFY_DEBUG -eq '1')
@@ -112,7 +124,7 @@ function Write-Decision {
                 $keep = Get-Content $log -Tail 200
                 [System.IO.File]::WriteAllLines($log, $keep)
             }
-            $stamp = [int][double]::Parse((Get-Date -UFormat %s))
+            $stamp = (Get-Epoch)
             Add-Content -Path $log -Value ("{0}|{1}" -f $stamp, $Text) -Encoding utf8
         } catch { }
     }
@@ -186,7 +198,7 @@ function Start-Watcher {
     if (Test-Path $aliveFile) {
         $last = (Get-Content $aliveFile -Raw).Trim()
         if ($last -match '^\d+$') {
-            $now = [int][double]::Parse((Get-Date -UFormat %s))
+            $now = (Get-Epoch)
             if (($now - [int]$last) -lt 150) { return }
         }
     }
@@ -200,8 +212,8 @@ if ($Kind -eq 'watch') {
     # suspends would make a long sleep fire late by however long it was asleep,
     # whereas comparing against an absolute time self-corrects on wake.
     while ($true) {
-        [System.IO.File]::WriteAllText($aliveFile, [string][int][double]::Parse((Get-Date -UFormat %s)))
-        $now = [int][double]::Parse((Get-Date -UFormat %s))
+        [System.IO.File]::WriteAllText($aliveFile, [string](Get-Epoch))
+        $now = (Get-Epoch)
         $pending = $false
         $firedThisTick = $false
 
@@ -299,7 +311,7 @@ $startFile   = Join-Path $env:TEMP "claude-notify-start.$safeSession"
 # --- mark: a turn began -------------------------------------------------------
 # This is the whole job of the UserPromptSubmit hook. No sound, no popup.
 if ($Kind -eq 'mark') {
-    try { [System.IO.File]::WriteAllText($startFile, [string][int][double]::Parse((Get-Date -UFormat %s))) } catch { }
+    try { [System.IO.File]::WriteAllText($startFile, [string](Get-Epoch)) } catch { }
     # Nothing to schedule: the status line records the real reset times. This
     # only makes sure something is watching them, since the watcher exits once
     # nothing is pending.
@@ -317,12 +329,12 @@ if ($Kind -eq 'limit' -and $env:CLAUDE_NOTIFY_DRYRUN -ne '1') {
             $already = $false
             if (Test-Path $estFile) {
                 $t = ((Get-Content $estFile -Raw) -split '\|')[0].Trim()
-                $now = [int][double]::Parse((Get-Date -UFormat %s))
+                $now = (Get-Epoch)
                 if ($t -match '^\d+$' -and $now -lt [int64]$t) { $already = $true }
             }
             if (-not $already) {
                 $hours = Get-IntOpt 'WINDOW_HOURS' 5
-                $at = [int][double]::Parse((Get-Date -UFormat %s)) + $hours * 3600
+                $at = (Get-Epoch) + $hours * 3600
                 [System.IO.File]::WriteAllText($estFile, "$at|estimated")
             }
         }
@@ -341,7 +353,7 @@ if (-not $force -and ((Test-InList $Kind $opt['MUTE']) -or $evEnabled -eq '0')) 
 # expires by itself, so a mute you forget about cannot silence things
 # permanently the way a plain flag would.
 if (-not $force -and $opt['MUTE_UNTIL'] -match '^\d+$') {
-    $nowEpoch = [int][double]::Parse((Get-Date -UFormat %s))
+    $nowEpoch = (Get-Epoch)
     if ($nowEpoch -lt [int64]$opt['MUTE_UNTIL']) {
         Write-Decision "kind=$Kind suppressed=quiet-until until=$($opt['MUTE_UNTIL'])"
         exit 0
@@ -392,7 +404,7 @@ $elapsed = $null
 if (Test-Path $startFile) {
     try {
         $started = [int](Get-Content $startFile -Raw).Trim()
-        $now     = [int][double]::Parse((Get-Date -UFormat %s))
+        $now     = (Get-Epoch)
         $elapsed = $now - $started
     } catch { $elapsed = $null }
     Remove-Item $startFile -Force -ErrorAction SilentlyContinue
@@ -685,7 +697,7 @@ if (-not $dryRun) {
     try {
         $pending = Join-Path $env:USERPROFILE '.claude\claude-notify-pending'
         if ($Kind -eq 'blocked') {
-            $stamp = [int][double]::Parse((Get-Date -UFormat %s))
+            $stamp = (Get-Epoch)
             [System.IO.File]::WriteAllText($pending, "$stamp|$detail")
         } elseif (Test-Path $pending) {
             Remove-Item $pending -Force -ErrorAction SilentlyContinue

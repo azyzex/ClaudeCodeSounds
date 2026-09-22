@@ -413,7 +413,7 @@ Check (Get-PushField 'done') 'no' "finished turns are not pushed by default"
 Set-Conf 'NTFY_TOPIC' ''
 
 Write-Host "  (a temporary mute expires by itself)"
-$future = [int][double]::Parse((Get-Date -UFormat %s)) + 3600
+$future = [int][DateTimeOffset]::UtcNow.ToUnixTimeSeconds() + 3600
 Set-Conf 'MUTE_UNTIL' "$future"
 Assert ((Get-Decision 'blocked') -like '*suppressed=quiet-until*') "a future MUTE_UNTIL silences everything"
 Set-Conf 'MUTE_UNTIL' '1'
@@ -549,7 +549,7 @@ function Invoke-Watch {
     & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $notifier -Kind watch *> $null
 }
 
-$past = [int][double]::Parse((Get-Date -UFormat %s)) - 5
+$past = [int][DateTimeOffset]::UtcNow.ToUnixTimeSeconds() - 5
 
 Write-Host '  (a reset Claude Code recorded still fires)'
 Set-Content -Path (Join-Path $h '.claude\claude-limits.json') -Encoding ascii -Value @(
@@ -558,6 +558,24 @@ $n0 = Get-LogLines
 Invoke-Watch
 $n1 = Get-LogLines
 Assert ($n1 -gt $n0) "the five hour reset fired"
+
+Write-Host '  (a reset still ahead does not fire, whatever the timezone)'
+# The regression test for the bug that made every alert arrive exactly one
+# timezone offset early. Get-Date -UFormat %s formats LOCAL time as though it
+# were UTC, so on UTC+1 "now" came back an hour large and the watcher believed
+# a reset an hour away had already happened.
+#
+# The old test could never have caught it: it built its future timestamp with
+# the same broken call, so the error cancelled out. This one uses the real
+# clock, and picks a gap smaller than any offset on earth would explain.
+Remove-Item (Join-Path $h '.claude\claude-reset-fired') -Force -ErrorAction SilentlyContinue
+$soon = [int][DateTimeOffset]::UtcNow.ToUnixTimeSeconds() + 1800
+Set-Content -Path (Join-Path $h '.claude\claude-limits.json') -Encoding ascii -Value @(
+    "updated=$([int][DateTimeOffset]::UtcNow.ToUnixTimeSeconds())",
+    "five_hour_resets_at=$soon", "seven_day_resets_at=$soon")
+$nBefore = Get-LogLines
+Invoke-Watch
+Check (Get-LogLines) $nBefore "silent while the reset is still half an hour away"
 
 Write-Host '  (and is announced once, never twice)'
 Invoke-Watch

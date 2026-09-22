@@ -56,7 +56,18 @@ $weekAt  = Get-Field 'seven_day' 'resets_at'
 if ($fiveAt -and (Test-Path $claudeDir)) {
     try {
         $lines = @(
-            "updated=$([int][double]::Parse((Get-Date -UFormat %s)))",
+# Seconds since the Unix epoch, correctly.
+#
+# Get-Date -UFormat %s is wrong on every machine that is not on UTC: Windows
+# PowerShell formats the LOCAL time as though it were UTC, so a clock one hour
+# ahead of UTC returns a value one hour too large. That is not a rounding
+# detail, it is the reason every reset alert arrived exactly one timezone
+# offset early: the watcher believed "now" was already past the reset.
+function Get-Epoch {
+    return [int][DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
+}
+
+            "updated=$((Get-Epoch))",
             "five_hour_resets_at=$fiveAt"
         )
         if ($fivePct) { $lines += "five_hour_used=$fivePct" }
@@ -73,7 +84,7 @@ if ($fiveAt -and (Test-Path $claudeDir)) {
         if (Test-Path $alive) {
             $last = (Get-Content $alive -Raw).Trim()
             if ($last -match '^\d+$') {
-                $now = [int][double]::Parse((Get-Date -UFormat %s))
+                $now = (Get-Epoch)
                 $running = ($now - [int]$last) -lt 150
             }
         }
