@@ -22,3 +22,7 @@ TAURI_SIGNING_PRIVATE_KEY.txt
 
 # Personal copy for posting. Not part of the project.
 LINKEDIN.txt
+
+# Python bytecode
+__pycache__/
+*.pyc
