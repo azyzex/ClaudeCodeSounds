@@ -1,4 +1,6 @@
-# Claude Code Sounds
+# Earshot — sound alerts for Claude Code
+
+**Know when it needs you.** (Earshot was first released as *Claude Code Sounds*, which is still this repository's name.)
 
 [![CI](https://github.com/azyzex/ClaudeCodeSounds/actions/workflows/ci.yml/badge.svg)](https://github.com/azyzex/ClaudeCodeSounds/actions/workflows/ci.yml)
 
