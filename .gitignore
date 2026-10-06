@@ -26,3 +26,6 @@ LINKEDIN.txt
 # Python bytecode
 __pycache__/
 *.pyc
+
+# Updater signing keypair (local only, never pushed)
+.signing/

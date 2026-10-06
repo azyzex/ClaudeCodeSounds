@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Claude Code Sounds",
-  "version": "0.7.1",
+  "version": "0.7.2",
   "identifier": "com.azyzex.claudecodesounds",
   "build": {
     "frontendDist": "../ui"
@@ -60,7 +60,7 @@
         "https://github.com/azyzex/ClaudeCodeSounds/releases/latest/download/latest.json"
       ],
       "dialog": true,
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IERFNjc1MzUxQzRBNUJBNApSV1NrVzBvY05YWG1EYzVKcHJ1RkRNU0FiZ1d3WDFtU2o1c1hoR3dZdE00OWZMeUowTVhLai9pOQo="
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDYyNUI4REQxRTExMzc1RkQKUldUOWRSUGgwWTFiWWxrN0d3d1laTkRHZWwwZHJFSmxlSzhhc2FGWU9pa0R3aE92alZpdGJ2V00K"
     }
   }
 }
